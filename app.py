@@ -14,14 +14,24 @@ st.write(
 )
 
 
-# دالة عامة وجذرية لعكس أي نص معكوس (سواء جوج أو ماكينة) وإعادته لأصله السليم
+# دالة عامة وجذرية لعكس أي نص معكوس وإعادته لأصله السليم
 def fix_reversed_text(val):
   if pd.isna(val):
     return val
   s = str(val).strip()
   if s:
+    # إزالة أي نزول سطر داخلي وجعله في سطر واحد أفقي
+    s = s.replace("\n", " ").replace("\r", " ")
     return s[::-1]
   return s
+
+
+# دالة لتنظيف النصوص العادية وجعلها في سطر واحد
+def clean_text_single_line(val):
+  if pd.isna(val):
+    return val
+  s = str(val).strip()
+  return s.replace("\n", " ").replace("\r", " ")
 
 
 uploaded_file = st.file_uploader(
@@ -85,12 +95,12 @@ if uploaded_file is not None:
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
 
-      # تطبيق دالة التصحيح الشاملة على أعمدة الماكينات والجوجات
-      if "Machine" in df.columns:
-        df["Machine"] = df["Machine"].apply(fix_reversed_text)
-
-      if "Gauge_Specs" in df.columns:
-        df["Gauge_Specs"] = df["Gauge_Specs"].apply(fix_reversed_text)
+      # تنظيف كل الأعمدة لضمان عدم وجود نزول لسطور متعددة داخل الخلية الواحدة
+      for col in df.columns:
+        if col in ["Machine", "Gauge_Specs"]:
+          df[col] = df[col].apply(fix_reversed_text)
+        else:
+          df[col] = df[col].apply(clean_text_single_line)
 
       wo_col = next(
           (
@@ -109,7 +119,7 @@ if uploaded_file is not None:
 
         df_sorted = df.sort_values(by=sort_cols)
 
-        # ترتيب الأعمدة لتكون مطابقة تماماً لشكل الجدول المطلوب (Gauge_Specs ثم Machine ثم باقي الأعمدة)
+        # ترتيب الأعمدة لتكون مطابقة تماماً للموقع
         priority_cols = ["Gauge_Specs", "Machine"]
         if seq_col and seq_col in df_sorted.columns:
           priority_cols.append(seq_col)
@@ -122,23 +132,21 @@ if uploaded_file is not None:
         final_columns_order = priority_cols + other_cols
         df_sorted = df_sorted[final_columns_order]
 
-        st.write("### 📊 معاينة البيانات بعد التصحيح الشامل لكل الجوجات والماكينات:")
+        st.write("### 📊 معاينة البيانات بعد التصحيح الكامل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تصدير إلى Excel مع تنسيق الخلايا (تفعيل Wrap Text وتوسيع العرض تلقائياً)
+        # تصدير إلى Excel مع جعل كل خلية في سطر واحد أفقي (بدون تكسير رأسي)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
           df_sorted.to_excel(
               writer, index=False, sheet_name="Master_Corrected_Plan"
           )
 
-          # تنسيق ملف الإكسيل باستخدام openpyxl لجعل الشكل منظماً واحترافياً
           workbook = writer.book
           worksheet = writer.sheets["Master_Corrected_Plan"]
 
           from openpyxl.styles import Alignment, Font, PatternFill
 
-          # تنسيق صف العنوان (Headers)
           header_fill = PatternFill(
               start_color="1F4E78", end_color="1F4E78", fill_type="solid"
           )
@@ -149,21 +157,22 @@ if uploaded_file is not None:
               cell.fill = header_fill
               cell.font = header_font
               cell.alignment = Alignment(
-                  horizontal="center", vertical="center", wrap_text=True
+                  horizontal="center", vertical="center", wrap_text=False
               )
 
-          # ضبط الـ Wrap Text وعرض الأعمدة لجميع الخلايا
+          # جعل جميع الخلايا في سطر واحد أفقي بدون التفاف (wrap_text=False) وتوسيع الأعمدة تلقائياً
           for col in worksheet.columns:
             max_len = 0
             col_letter = col[0].column_letter
             for cell in col:
               cell.alignment = Alignment(
-                  vertical="center", wrap_text=True, horizontal="center"
+                  vertical="center", horizontal="center", wrap_text=False
               )
-              if cell.row > 1 and cell.value:
+              if cell.value:
                 max_len = max(max_len, len(str(cell.value)))
+            # ضبط عرض العمود بناءً على أطول نص ليظهر كاملاً في سطر واحد
             worksheet.column_dimensions[col_letter].width = max(
-                max_len + 3, 15
+                min(max_len + 4, 60), 18
             )
 
         processed_data = output.getvalue()
