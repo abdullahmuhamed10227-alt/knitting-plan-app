@@ -1,71 +1,98 @@
 import io
 import pandas as pd
+import pdfplumber
 import streamlit as st
 
 st.set_page_config(
     page_title="Knitting Plan Restructurer", page_icon="🧵", layout="wide"
 )
 
-st.title("🧵 نظام إعادة هيكلة خطة التريكو (Knitting Plan)")
+st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "مرحباً بك يا بشمهندس! ارفع ملف الـ Plan الخاص بالإنتاج لتحويل وترتيب"
-    " البيانات بحيث يكون **رقم أمر الشغل (Work Order)** هو الأساس."
+    "هذا التطبيق مخصص لمهندسي الإنتاج لتحليل تقارير الـ Plan وعكس ترتيبها بحيث"
+    " يكون **رقم أمر الشغل (Work Order)** هو الأساس أمام جميع الماكينات"
+    " والكميات."
 )
 
+# رفع الملف (يدعم PDF و Excel)
 uploaded_file = st.file_uploader(
-    "اختر ملف خطة الإنتاج (Excel أو CSV أو محاكاة PDF)",
-    type=["xlsx", "csv", "pdf"],
+    "اختر ملف خطة الإنتاج الحقيقي (PDF أو Excel)", type=["pdf", "xlsx", "csv"]
 )
 
 if uploaded_file is not None:
-  st.success("تم رفع الملف بنجاح! جاري معالجة البيانات...")
+  st.success("تم رفع الملف بنجاح! جاري معالجة واستخراج البيانات...")
 
   try:
+    df = None
+    # 1. لو الملف Excel أو CSV
     if uploaded_file.name.endswith(".xlsx"):
       df = pd.read_excel(uploaded_file)
     elif uploaded_file.name.endswith(".csv"):
       df = pd.read_csv(uploaded_file)
-    else:
-      # داتا تجريبية افتراضية في حالة ملف الـ PDF للتأكد من عمل الموقع فوراً
-      data = {
-          "Work_Order": ["485419-1", "486899-1", "486899-1", "489739-1"],
-          "Machine": ["M1139", "M1041", "M1035", "M1041"],
-          "Seq": [10, 10, 10, 20],
-          "Pl_Tot_Qty": ["5136/6050", "770/2890", "803/2890", "1350/2700"],
-          "Customer_Name": [
-              "NIKE",
-              "TOMMY HILFIGER",
-              "TOMMY HILFIGER",
-              "TOMMY HILFIGER",
-          ],
-      }
-      df = pd.DataFrame(data)
 
-    # الترتيب حسب أمر الشغل والـ Seq
-    if "Work_Order" in df.columns and "Seq" in df.columns:
-      df_sorted = df.sort_values(by=["Work_Order", "Seq"])
-    else:
-      df_sorted = df
+    # 2. لو الملف PDF (استخراج الجداول الحقيقية من كل الصفحات)
+    elif uploaded_file.name.endswith(".pdf"):
+      all_data = []
+      with pdfplumber.open(uploaded_file) as pdf:
+        for page in pdf.pages:
+          table = page.extract_table()
+          if table:
+            all_data.extend(table)
 
-    st.write("### 📊 معاينة البيانات بعد إعادة الهيكلة:")
-    st.dataframe(df_sorted, use_container_width=True)
+      if all_data:
+        # أول صف يعتبر هو عناوين الأعمدة (Headers)
+        headers = all_data[0]
+        rows = all_data[1:]
+        df = pd.DataFrame(rows, columns=headers)
+      else:
+        st.warning(
+            "لم يتم العثور على جداول واضحة داخل ملف الـ PDF. يرجى التأكد من أن"
+            " الملف يحتوي على جداول نصية."
+        )
 
-    # زر التحميل لملف الإكسيل
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-      df_sorted.to_excel(writer, index=False, sheet_name="Restructured_Plan")
-    processed_data = output.getvalue()
+    if df is not None and not df.empty:
+      # تنظيف أسماء الأعمدة لإزالة المسافات الزائدة
+      df.columns = [str(col).strip() for col in df.columns]
 
-    st.download_button(
-        label="📥 تحميل الملف الجديد مرتباً (Excel)",
-        data=processed_data,
-        file_name="Rearranged_Knitting_Plan.xlsx",
-        mime=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-    )
+      # البحث عن عمود أمر الشغل والترتيب بغض النظر عن المسافات
+      wo_col = next(
+          (col for col in df.columns if "Work Order" in col or "Work_Order" in col),
+          None,
+      )
+      seq_col = next((col for col in df.columns if "Seq" in col), None)
+
+      if wo_col:
+        # فرز البيانات وترتيبها بناءً على أمر الشغل
+        if seq_col:
+          df_sorted = df.sort_values(by=[wo_col, seq_col])
+        else:
+          df_sorted = df.sort_values(by=[wo_col])
+
+        st.write("### 📊 معاينة البيانات الحقيقية بعد إعادة الهيكلة:")
+        st.dataframe(df_sorted, use_container_width=True)
+
+        # زر تحميل الملف الناتج بصيغة Excel
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+          df_sorted.to_excel(writer, index=False, sheet_name="Restructured_Plan")
+        processed_data = output.getvalue()
+
+        st.download_button(
+            label="📥 تحميل الملف الجديد بالكامل مرتباً (Excel)",
+            data=processed_data,
+            file_name="Real_Restructured_Knitting_Plan.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        )
+      else:
+        st.error(
+            "لم يتم العثور على عمود الـ Work Order في الملف المرفوع. تأكد من"
+            " تطابق أسماء الأعمدة."
+        )
+        st.dataframe(df)
 
   except Exception as e:
-    st.error(f"حدث خطأ أثناء المعالجة: {e}")
+    st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
 else:
-    st.info("الرجاء رفع الملف للبدء.")
+  st.info("الرجاء رفع ملف الـ Plan الفعلي (PDF أو Excel) للبدء.")
