@@ -20,7 +20,6 @@ def fix_reversed_text(val):
     return val
   s = str(val).strip()
   if s:
-    # عكس اتجاه النص بالكامل ليعود بالشكل الهندسي والصحيح للقراءة
     return s[::-1]
   return s
 
@@ -86,7 +85,7 @@ if uploaded_file is not None:
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
 
-      # تطبيق دالة التصحيح الشاملة على أعمدة الماكينات والجوجات لضبط كل النصوص المعكوسة
+      # تطبيق دالة التصحيح الشاملة على أعمدة الماكينات والجوجات
       if "Machine" in df.columns:
         df["Machine"] = df["Machine"].apply(fix_reversed_text)
 
@@ -111,7 +110,8 @@ if uploaded_file is not None:
         df_sorted = df.sort_values(by=sort_cols)
 
         st.write("### 📊 معاينة البيانات بعد التصحيح الشامل لكل الجوجات والماكينات:")
-        st.dataframe(df_sorted, use_container_width=True)
+        # تم إخفاء الـ Index الافتراضي هنا بناءً على طلبك
+        st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -132,7 +132,7 @@ if uploaded_file is not None:
         st.error(
             "لم يتم العثور على عمود الـ Work Order في الأعمدة المستخرجة."
         )
-        st.dataframe(df)
+        st.dataframe(df, hide_index=True)
 
   except Exception as e:
     st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
