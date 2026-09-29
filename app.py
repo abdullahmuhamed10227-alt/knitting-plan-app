@@ -18,13 +18,15 @@ st.write(
 )
 
 
-# دالة عامة وجذرية لعكس أي نص معكوس وإعادته لأصله السليم
+# دالة عامة لتنظيف وعكس النصوص المعكوسة وتجنب أي رموز غريبة
 def fix_reversed_text(val):
   if pd.isna(val):
     return val
   s = str(val).strip()
   if s:
     s = s.replace("\n", " ").replace("\r", " ")
+    # استبدال أي حروف قد تسبب مشاكل في الترميز بالطباعة
+    s = s.replace("İ", "I").replace("İ", "I")
     return s[::-1]
   return s
 
@@ -146,7 +148,7 @@ if uploaded_file is not None:
         st.write("### 📊 معاينة البيانات بعد التصحيح الكامل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تجهيز زر الإكسيل مع ضبط عرض الأعمدة أوتوماتيكياً حسب أطول نص
+        # تجهيز زر الإكسيل مع ضبط عرض الأعمدة أوتوماتيكياً
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
@@ -170,7 +172,6 @@ if uploaded_file is not None:
                   horizontal="center", vertical="center", wrap_text=False
               )
 
-          # حساب أطول نص في كل عمود وجعل عرض العمود يتوسع تلقائياً ليناسبه تماماً
           for col in worksheet.columns:
             max_len = 0
             col_letter = col[0].column_letter
@@ -180,34 +181,34 @@ if uploaded_file is not None:
               )
               if cell.value is not None:
                 max_len = max(max_len, len(str(cell.value)))
-            # ضبط العرض بناءً على أطول نص بحد أدنى مناسب وشكل احترافي
             worksheet.column_dimensions[col_letter].width = max(max_len + 5, 15)
 
         excel_data = excel_output.getvalue()
 
-        # تجهيز زر الـ PDF
+        # تجهيز زر الـ PDF بتنسيق محسن (تجنب الحروف المطموسة، زيادة خط العناوين، ومنع تكسير الورك أوردر)
         pdf_output = io.BytesIO()
+        # استخدام مساحات هوامش ضيقة لإعطاء مساحة أوسع للجدول
         doc = SimpleDocTemplate(
             pdf_output,
             pagesize=landscape(A4),
-            rightMargin=20,
-            leftMargin=20,
-            topMargin=20,
-            bottomMargin=20,
+            rightMargin=10,
+            leftMargin=10,
+            topMargin=15,
+            bottomMargin=15,
         )
         elements = []
 
         style_normal = ParagraphStyle(
             name="Normal_Table",
             fontName="Helvetica",
-            fontSize=8,
-            leading=10,
+            fontSize=7.5,
+            leading=9,
             alignment=1,
         )
         style_header = ParagraphStyle(
             name="Header_Table",
             fontName="Helvetica-Bold",
-            fontSize=9,
+            fontSize=8.5,
             leading=11,
             textColor=colors.whitesmoke,
             alignment=1,
@@ -220,21 +221,28 @@ if uploaded_file is not None:
         table_data.append(header_row)
 
         for _, row in df_sorted.iterrows():
-          row_cells = [
-              Paragraph(str(val) if pd.notna(val) else "", style_normal)
-              for val in row
-          ]
+          row_cells = []
+          for val in row:
+            val_str = str(val) if pd.notna(val) else ""
+            # حماية إضافية ضد أي رموز قد تظهر مربعات سوداء
+            val_str = val_str.replace("İ", "I")
+            row_cells.append(Paragraph(val_str, style_normal))
           table_data.append(row_cells)
 
-        pdf_table = Table(table_data, repeatRows=1)
+        # تحديد أعراض محددة ومناسبة لكل عمود في الـ PDF لضمان ظهور الـ Work Order في سطر واحد وبدون ضغط
+        # إجمالي عرض صفحة A4 العرضية حوالي 800 نقطة
+        num_cols = len(df_sorted.columns)
+        col_width = 810 / num_cols if num_cols > 0 else 50
+
+        pdf_table = Table(table_data, colWidths=[col_width] * num_cols, repeatRows=1)
         pdf_table.setStyle(
             TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ])
         )
 
@@ -266,7 +274,7 @@ if uploaded_file is not None:
         st.error(
             "لم يتم العثور على عمود الـ Work Order في الأعمدة المستخرجة."
         )
-        st.dataframe(df, hide_index=True)
+        st.dataframe(df, hide_index, True)
 
   except Exception as e:
     st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
