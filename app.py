@@ -57,7 +57,6 @@ if uploaded_file is not None:
 
         df = pd.DataFrame(all_rows, columns=clean_headers)
 
-        # استبعاد الأعمدة الوهمية أو الزائدة التي تبدأ بـ col أو غير مسمى
         valid_cols = [
             c
             for c in df.columns
@@ -75,6 +74,7 @@ if uploaded_file is not None:
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
 
+      # البحث عن أعمدة أمر الشغل والماكينة
       wo_col = next(
           (
               col
@@ -83,26 +83,36 @@ if uploaded_file is not None:
           ),
           None,
       )
+      mach_col = next(
+          (col for col in df.columns if "Acs" in col or "Machine" in col), None
+      )
       seq_col = next((col for col in df.columns if "Seq" in col), None)
 
       if wo_col:
+        # تجميع وترتيب الجدول بحيث يتم جلب الـ Work Order أولاً،
+        # وتحته مباشرة تتجمع كل الماكينات والـ Seq المرتبطة به.
+        sort_cols = [wo_col]
         if seq_col:
-          df_sorted = df.sort_values(by=[wo_col, seq_col])
-        else:
-          df_sorted = df.sort_values(by=[wo_col])
+          sort_cols.append(seq_col)
+        if mach_col:
+          sort_cols.append(mach_col)
 
-        st.write("### 📊 معاينة البيانات بعد تنظيفها وإعادة هيكلتها:")
+        df_sorted = df.sort_values(by=sort_cols)
+
+        st.write(
+            "### 📊 معاينة البيانات بعد تجميع أمر الشغل مع كافة الماكينات:"
+        )
         st.dataframe(df_sorted, use_container_width=True)
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-          df_sorted.to_excel(writer, index=False, sheet_name="Restructured_Plan")
+          df_sorted.to_excel(writer, index=False, sheet_name="WorkOrder_Centric")
         processed_data = output.getvalue()
 
         st.download_button(
-            label="📥 تحميل الملف الجديد بالكامل مرتباً (Excel)",
+            label="📥 تحميل الملف المرتب والمجمع حسب أمر الشغل (Excel)",
             data=processed_data,
-            file_name="Clean_Restructured_Plan.xlsx",
+            file_name="WorkOrder_Centric_Plan.xlsx",
             mime=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ),
