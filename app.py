@@ -9,9 +9,8 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لمهندسي الإنتاج لتحليل تقارير الـ Plan وعكس ترتيبها بحيث"
-    " يكون **رقم أمر الشغل (Work Order)** هو الأساس أمام جميع الماكينات"
-    " والكميات."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج بحيث يصبح **أمر الشغل (Work Order)**"
+    " هو الأساس مع إظهار كافة تفاصيل الماكينات، الجوج، والبوصة بدقة."
 )
 
 uploaded_file = st.file_uploader(
@@ -19,7 +18,7 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-  st.success("تم رفع الملف بنجاح! جاري معالجة واستخراج البيانات...")
+  st.success("تم رفع الملف بنجاح! جاري معالجة البيانات...")
 
   try:
     df = None
@@ -57,6 +56,7 @@ if uploaded_file is not None:
 
         df = pd.DataFrame(all_rows, columns=clean_headers)
 
+        # تنظيف أي أعمدة جانبية فارغة أو ترقيم صفحة غير مسمى
         valid_cols = [
             c
             for c in df.columns
@@ -65,61 +65,52 @@ if uploaded_file is not None:
         if valid_cols:
           df = df[valid_cols]
 
-      else:
-        st.warning(
-            "لم يتم العثور على جداول واضحة داخل ملف الـ PDF. تأكد من تنسيق"
-            " الملف."
-        )
-
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
 
-      # البحث عن أعمدة أمر الشغل والماكينة
+      # البحث عن الأعمدة الأساسية بذكاء
       wo_col = next(
           (
               col
               for col in df.columns
-              if "Work Order" in col or "Work_Order" in col
+              if "work order" in col.lower() or "work_order" in col.lower()
           ),
           None,
       )
-      mach_col = next(
-          (col for col in df.columns if "Acs" in col or "Machine" in col), None
-      )
-      seq_col = next((col for col in df.columns if "Seq" in col), None)
+      seq_col = next((col for col in df.columns if "seq" in col.lower()), None)
 
       if wo_col:
-        # تجميع وترتيب الجدول بحيث يتم جلب الـ Work Order أولاً،
-        # وتحته مباشرة تتجمع كل الماكينات والـ Seq المرتبطة به.
+        # ترتيب البيانات بناءً على أمر الشغل أولاً ثم السيكونس أو الماكينة
         sort_cols = [wo_col]
         if seq_col:
           sort_cols.append(seq_col)
-        if mach_col:
-          sort_cols.append(mach_col)
 
         df_sorted = df.sort_values(by=sort_cols)
 
         st.write(
-            "### 📊 معاينة البيانات بعد تجميع أمر الشغل مع كافة الماكينات:"
+            "### 📊 معاينة البيانات بعد إعادة الهيكلة (حسب أمر الشغل والماكينات"
+            " وتفاصيلها):"
         )
         st.dataframe(df_sorted, use_container_width=True)
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-          df_sorted.to_excel(writer, index=False, sheet_name="WorkOrder_Centric")
+          df_sorted.to_excel(
+              writer, index=False, sheet_name="WorkOrder_Centric_Plan"
+          )
         processed_data = output.getvalue()
 
         st.download_button(
-            label="📥 تحميل الملف المرتب والمجمع حسب أمر الشغل (Excel)",
+            label="📥 تحميل الملف المرتب نهائياً (Excel)",
             data=processed_data,
-            file_name="WorkOrder_Centric_Plan.xlsx",
+            file_name="Final_Restructured_Knitting_Plan.xlsx",
             mime=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ),
         )
       else:
         st.error(
-            "لم يتم العثور على عمود الـ Work Order بأسماء الأعمدة المستخرجة."
+            "لم يتم العثور على عمود الـ Work Order في الأعمدة المستخرجة."
         )
         st.dataframe(df)
 
