@@ -9,32 +9,19 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج وتصحيح اتجاهات النصوص والماكينات"
-    " والجوجات المعكوسة تلقائياً."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج وتصحيح وتعديل اتجاهات النصوص"
+    " والأرقام المعكوسة لجميع الماكينات والجوجات تلقائياً."
 )
 
 
-# دالة ذكية لتصحيح اتجاه أرقام الماكينات
-def fix_machine_direction(val):
+# دالة عامة وجذرية لعكس أي نص معكوس (سواء جوج أو ماكينة) وإعادته لأصله السليم
+def fix_reversed_text(val):
   if pd.isna(val):
     return val
   s = str(val).strip()
-  if s and s[0].isdigit() and s[-1].isalpha():
+  if s:
+    # عكس اتجاه النص بالكامل ليعود بالشكل الهندسي والصحيح للقراءة
     return s[::-1]
-  return s
-
-
-# دالة لتصحيح انعكاس نصوص الجوجات والمواصفات المعكوسة (RTL/LTR fix)
-def fix_gauge_direction(val):
-  if pd.isna(val):
-    return val
-  s = str(val).strip()
-  # إذا كان النص معكوساً بالكامل (مثل BİR-TNİ وتنعكس لجملة أخرى)
-  # نقوم بانعكاس النص لإرجاع الكلمات لأصلها الصحيح في تقارير النظام
-  if "BİR-TNİ" in s or "TNİ" in s or ("/" in s and any(c.isalpha() for c in s)):
-    # قلب الكلمات أو الحروف المعكوسة بناءً على نموذج الرؤية
-    # تصحيح الانعكاس النصي الشائع في الـ PDF
-    s = s.replace("BİR-TNİ", "İNT-RİB").replace("61/43", "34/16")
   return s
 
 
@@ -99,12 +86,12 @@ if uploaded_file is not None:
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
 
-      # تطبيق دوال التصحيح على الماكينات والجوجات
+      # تطبيق دالة التصحيح الشاملة على أعمدة الماكينات والجوجات لضبط كل النصوص المعكوسة
       if "Machine" in df.columns:
-        df["Machine"] = df["Machine"].apply(fix_machine_direction)
+        df["Machine"] = df["Machine"].apply(fix_reversed_text)
 
       if "Gauge_Specs" in df.columns:
-        df["Gauge_Specs"] = df["Gauge_Specs"].apply(fix_gauge_direction)
+        df["Gauge_Specs"] = df["Gauge_Specs"].apply(fix_reversed_text)
 
       wo_col = next(
           (
@@ -123,20 +110,20 @@ if uploaded_file is not None:
 
         df_sorted = df.sort_values(by=sort_cols)
 
-        st.write("### 📊 معاينة البيانات بعد التصحيح الهندسي الكامل:")
+        st.write("### 📊 معاينة البيانات بعد التصحيح الشامل لكل الجوجات والماكينات:")
         st.dataframe(df_sorted, use_container_width=True)
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
           df_sorted.to_excel(
-              writer, index=False, sheet_name="Perfect_Knitting_Plan"
+              writer, index=False, sheet_name="Master_Corrected_Plan"
           )
         processed_data = output.getvalue()
 
         st.download_button(
-            label="📥 تحميل الملف النهائي المعتمد (Excel)",
+            label="📥 تحميل الملف النهائي المعتمد بالكامل (Excel)",
             data=processed_data,
-            file_name="Perfect_Knitting_Plan.xlsx",
+            file_name="Master_Corrected_Knitting_Plan.xlsx",
             mime=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ),
