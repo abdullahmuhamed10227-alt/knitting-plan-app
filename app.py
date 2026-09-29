@@ -10,7 +10,7 @@ st.set_page_config(
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
     "هذا التطبيق مخصص لترتيب تقارير الإنتاج بحيث يصبح **أمر الشغل (Work Order)**"
-    " هو الأساس مع إظهار كافة تفاصيل الماكينات، الجوج، والبوصة بدقة."
+    " هو الأساس مع إظهار أرقام الماكينات، الجوج، والبوصة وتثبيتها بدقة."
 )
 
 uploaded_file = st.file_uploader(
@@ -46,29 +46,36 @@ if uploaded_file is not None:
         clean_headers = []
         seen = {}
         for h in headers:
-          h_str = str(h).strip() if h else "col"
+          h_str = str(h).strip() if h else ""
           if h_str in seen:
             seen[h_str] += 1
             clean_headers.append(f"{h_str}_{seen[h_str]}")
           else:
             seen[h_str] = 0
-            clean_headers.append(h_str)
+            clean_headers.append(h_str if h_str else f"Col_{seen[h_str]}")
 
         df = pd.DataFrame(all_rows, columns=clean_headers)
 
-        # تنظيف أي أعمدة جانبية فارغة أو ترقيم صفحة غير مسمى
-        valid_cols = [
-            c
-            for c in df.columns
-            if not c.startswith("col") and c != "None" and c != ""
-        ]
-        if valid_cols:
-          df = df[valid_cols]
+        # إعادة تسمية أول عمودين (الخاصين بالماكينة والجوج والبوصة من جهة اليسار في الـ PDF)
+        cols_list = list(df.columns)
+        rename_dict = {}
+        if len(cols_list) > 0:
+          rename_dict[cols_list[0]] = "Gauge_Specs"
+        if len(cols_list) > 1:
+          rename_dict[cols_list[1]] = "Machine"
+
+        if rename_dict:
+          df = df.rename(columns=rename_dict)
+
+        # توريث بيانات الماكينة والجوج لأسفل لتجنب الفراغات في الأوردرات المتعددة لنفس الماكينة
+        if "Machine" in df.columns:
+          df["Machine"] = df["Machine"].ffill()
+        if "Gauge_Specs" in df.columns:
+          df["Gauge_Specs"] = df["Gauge_Specs"].ffill()
 
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
 
-      # البحث عن الأعمدة الأساسية بذكاء
       wo_col = next(
           (
               col
@@ -80,30 +87,26 @@ if uploaded_file is not None:
       seq_col = next((col for col in df.columns if "seq" in col.lower()), None)
 
       if wo_col:
-        # ترتيب البيانات بناءً على أمر الشغل أولاً ثم السيكونس أو الماكينة
         sort_cols = [wo_col]
         if seq_col:
           sort_cols.append(seq_col)
 
         df_sorted = df.sort_values(by=sort_cols)
 
-        st.write(
-            "### 📊 معاينة البيانات بعد إعادة الهيكلة (حسب أمر الشغل والماكينات"
-            " وتفاصيلها):"
-        )
+        st.write("### 📊 معاينة البيانات بعد ضبط الماكينات والجوجات:")
         st.dataframe(df_sorted, use_container_width=True)
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
           df_sorted.to_excel(
-              writer, index=False, sheet_name="WorkOrder_Centric_Plan"
+              writer, index=False, sheet_name="Complete_WorkOrder_Plan"
           )
         processed_data = output.getvalue()
 
         st.download_button(
-            label="📥 تحميل الملف المرتب نهائياً (Excel)",
+            label="📥 تحميل الملف النهائي مرتباً بالكامل (Excel)",
             data=processed_data,
-            file_name="Final_Restructured_Knitting_Plan.xlsx",
+            file_name="Complete_Knitting_Plan.xlsx",
             mime=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ),
