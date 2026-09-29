@@ -2,6 +2,10 @@ import io
 import pandas as pd
 import pdfplumber
 import streamlit as st
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(
     page_title="Knitting Plan Restructurer", page_icon="🧵", layout="wide"
@@ -10,7 +14,7 @@ st.set_page_config(
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
     "هذا التطبيق مخصص لترتيب تقارير الإنتاج وتصحيح وتعديل اتجاهات النصوص"
-    " والأرقام المعكوسة وتنسيق ملف الإكسيل ليطابق الموقع بدقة."
+    " والأرقام المعكوسة وتنسيق ملفات الإكسيل والـ PDF بدقة."
 )
 
 
@@ -133,7 +137,6 @@ if uploaded_file is not None:
         final_columns_order = priority_cols + other_cols
         df_sorted = df_sorted[final_columns_order]
 
-        # 📌 عداد أمان دائم ومميز يوضح إجمالي السطور بدقة
         total_rows = len(df_sorted)
         st.success(
             f"✅ تم بنجاح استخراج وترتيب كافة البيانات | إجمالي عدد السطور:"
@@ -143,12 +146,12 @@ if uploaded_file is not None:
         st.write("### 📊 معاينة البيانات بعد التصحيح الكامل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        # تجهيز زر الإكسيل مع ضبط عرض الأعمدة أوتوماتيكياً حسب أطول نص
+        excel_output = io.BytesIO()
+        with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
               writer, index=False, sheet_name="Master_Corrected_Plan"
           )
-
           workbook = writer.book
           worksheet = writer.sheets["Master_Corrected_Plan"]
 
@@ -167,6 +170,7 @@ if uploaded_file is not None:
                   horizontal="center", vertical="center", wrap_text=False
               )
 
+          # حساب أطول نص في كل عمود وجعل عرض العمود يتوسع تلقائياً ليناسبه تماماً
           for col in worksheet.columns:
             max_len = 0
             col_letter = col[0].column_letter
@@ -174,22 +178,90 @@ if uploaded_file is not None:
               cell.alignment = Alignment(
                   vertical="center", horizontal="center", wrap_text=False
               )
-              if cell.value:
+              if cell.value is not None:
                 max_len = max(max_len, len(str(cell.value)))
-            worksheet.column_dimensions[col_letter].width = max(
-                min(max_len + 4, 60), 18
-            )
+            # ضبط العرض بناءً على أطول نص بحد أدنى مناسب وشكل احترافي
+            worksheet.column_dimensions[col_letter].width = max(max_len + 5, 15)
 
-        processed_data = output.getvalue()
+        excel_data = excel_output.getvalue()
 
-        st.download_button(
-            label="📥 تحميل الملف النهائي المعتمد بالكامل (Excel)",
-            data=processed_data,
-            file_name="Master_Corrected_Knitting_Plan.xlsx",
-            mime=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
+        # تجهيز زر الـ PDF
+        pdf_output = io.BytesIO()
+        doc = SimpleDocTemplate(
+            pdf_output,
+            pagesize=landscape(A4),
+            rightMargin=20,
+            leftMargin=20,
+            topMargin=20,
+            bottomMargin=20,
         )
+        elements = []
+
+        style_normal = ParagraphStyle(
+            name="Normal_Table",
+            fontName="Helvetica",
+            fontSize=8,
+            leading=10,
+            alignment=1,
+        )
+        style_header = ParagraphStyle(
+            name="Header_Table",
+            fontName="Helvetica-Bold",
+            fontSize=9,
+            leading=11,
+            textColor=colors.whitesmoke,
+            alignment=1,
+        )
+
+        table_data = []
+        header_row = [
+            Paragraph(str(col), style_header) for col in df_sorted.columns
+        ]
+        table_data.append(header_row)
+
+        for _, row in df_sorted.iterrows():
+          row_cells = [
+              Paragraph(str(val) if pd.notna(val) else "", style_normal)
+              for val in row
+          ]
+          table_data.append(row_cells)
+
+        pdf_table = Table(table_data, repeatRows=1)
+        pdf_table.setStyle(
+            TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ])
+        )
+
+        elements.append(pdf_table)
+        doc.build(elements)
+        pdf_data = pdf_output.getvalue()
+
+        col1, col2 = st.columns(2)
+        with col1:
+          st.download_button(
+              label="📥 تحميل الملف النهائي (Excel)",
+              data=excel_data,
+              file_name="Master_Corrected_Knitting_Plan.xlsx",
+              mime=(
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              ),
+              use_container_width=True,
+          )
+        with col2:
+          st.download_button(
+              label="📥 تحميل التقرير المرتب (PDF)",
+              data=pdf_data,
+              file_name="Master_Corrected_Knitting_Plan.pdf",
+              mime="application/pdf",
+              use_container_width=True,
+          )
+
       else:
         st.error(
             "لم يتم العثور على عمود الـ Work Order في الأعمدة المستخرجة."
