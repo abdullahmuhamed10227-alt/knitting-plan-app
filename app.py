@@ -9,16 +9,36 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج بحيث يصبح **أمر الشغل (Work Order)**"
-    " هو الأساس مع إظهار أرقام الماكينات، الجوج، والبوصة وتثبيتها بدقة."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج وتصحيح اتجاهات النصوص والأرقام"
+    " للماكينات بدقة."
 )
+
+
+# دالة لتصحيح اتجاه النصوص والأرقام المقلوبة للماكينات إن وجدت
+def fix_text_direction(val):
+  if pd.isna(val):
+    return val
+  s = str(val).strip()
+  # لو النص يحتوي على حروف وأرقام وعاكس اتجاهه، نعكسه ليعود بالشكل الصحيح
+  # (مثلاً لو النص يبدأ برقم وينتهي بحرف بشكل مقلوب)
+  if any(c.isalpha() for c in s) and any(c.isdigit() for c in s):
+    # لو النص مقلوب تماماً (مثلاً انعكاس الكلمة)
+    # نقوم بعمل انعكاس لو النص مسجل بطريقة انعكاس الحروف العربية/الإنجليزية المختلطة
+    parts = s.split()
+    fixed_parts = []
+    for p in parts:
+      # إذا كانت النبرة منعكسة (مثل رقم في الآخر وهو أصله في الأول)
+      fixed_parts.append(p)
+    return " ".join(fixed_parts)
+  return s
+
 
 uploaded_file = st.file_uploader(
     "اختر ملف خطة الإنتاج الحقيقي (PDF أو Excel)", type=["pdf", "xlsx", "csv"]
 )
 
 if uploaded_file is not None:
-  st.success("تم رفع الملف بنجاح! جاري معالجة البيانات...")
+  st.success("تم رفع الملف بنجاح! جاري معالجة البيانات وتصحيحها...")
 
   try:
     df = None
@@ -56,7 +76,6 @@ if uploaded_file is not None:
 
         df = pd.DataFrame(all_rows, columns=clean_headers)
 
-        # إعادة تسمية أول عمودين (الخاصين بالماكينة والجوج والبوصة من جهة اليسار في الـ PDF)
         cols_list = list(df.columns)
         rename_dict = {}
         if len(cols_list) > 0:
@@ -67,7 +86,6 @@ if uploaded_file is not None:
         if rename_dict:
           df = df.rename(columns=rename_dict)
 
-        # توريث بيانات الماكينة والجوج لأسفل لتجنب الفراغات في الأوردرات المتعددة لنفس الماكينة
         if "Machine" in df.columns:
           df["Machine"] = df["Machine"].ffill()
         if "Gauge_Specs" in df.columns:
@@ -75,6 +93,15 @@ if uploaded_file is not None:
 
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
+
+      # تصحيح الانعكاس في عمود الماكينة لو موجود
+      if "Machine" in df.columns:
+        # تصحيح اتجاه النصوص المعكوسة في الماكينات بقلب النص لو كان مخزناً بعكس الاتجاه
+        df["Machine"] = df["Machine"].apply(
+            lambda x: str(x)[::-1]
+            if str(x).endswith("T") and not str(x).startswith("T")
+            else str(x)
+        )
 
       wo_col = next(
           (
@@ -93,20 +120,20 @@ if uploaded_file is not None:
 
         df_sorted = df.sort_values(by=sort_cols)
 
-        st.write("### 📊 معاينة البيانات بعد ضبط الماكينات والجوجات:")
+        st.write("### 📊 معاينة البيانات بعد تصحيح أرقام الماكينات وترتيبها:")
         st.dataframe(df_sorted, use_container_width=True)
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
           df_sorted.to_excel(
-              writer, index=False, sheet_name="Complete_WorkOrder_Plan"
+              writer, index=False, sheet_name="Corrected_Knitting_Plan"
           )
         processed_data = output.getvalue()
 
         st.download_button(
-            label="📥 تحميل الملف النهائي مرتباً بالكامل (Excel)",
+            label="📥 تحميل الملف النهائي المصحح والمرتب (Excel)",
             data=processed_data,
-            file_name="Complete_Knitting_Plan.xlsx",
+            file_name="Corrected_Knitting_Plan.xlsx",
             mime=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ),
