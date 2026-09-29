@@ -10,7 +10,7 @@ st.set_page_config(
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
     "هذا التطبيق مخصص لترتيب تقارير الإنتاج وتصحيح وتعديل اتجاهات النصوص"
-    " والأرقام المعكوسة لجميع الماكينات والجوجات تلقائياً."
+    " والأرقام المعكوسة وتنسيق ملف الإكسيل ليطابق الموقع بدقة."
 )
 
 
@@ -109,15 +109,63 @@ if uploaded_file is not None:
 
         df_sorted = df.sort_values(by=sort_cols)
 
+        # ترتيب الأعمدة لتكون مطابقة تماماً لشكل الجدول المطلوب (Gauge_Specs ثم Machine ثم باقي الأعمدة)
+        priority_cols = ["Gauge_Specs", "Machine"]
+        if seq_col and seq_col in df_sorted.columns:
+          priority_cols.append(seq_col)
+        if wo_col and wo_col not in priority_cols:
+          priority_cols.append(wo_col)
+
+        other_cols = [
+            c for c in df_sorted.columns if c not in priority_cols
+        ]
+        final_columns_order = priority_cols + other_cols
+        df_sorted = df_sorted[final_columns_order]
+
         st.write("### 📊 معاينة البيانات بعد التصحيح الشامل لكل الجوجات والماكينات:")
-        # تم إخفاء الـ Index الافتراضي هنا بناءً على طلبك
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
+        # تصدير إلى Excel مع تنسيق الخلايا (تفعيل Wrap Text وتوسيع العرض تلقائياً)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
           df_sorted.to_excel(
               writer, index=False, sheet_name="Master_Corrected_Plan"
           )
+
+          # تنسيق ملف الإكسيل باستخدام openpyxl لجعل الشكل منظماً واحترافياً
+          workbook = writer.book
+          worksheet = writer.sheets["Master_Corrected_Plan"]
+
+          from openpyxl.styles import Alignment, Font, PatternFill
+
+          # تنسيق صف العنوان (Headers)
+          header_fill = PatternFill(
+              start_color="1F4E78", end_color="1F4E78", fill_type="solid"
+          )
+          header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+
+          for col_num, col in enumerate(worksheet.iter_cols(min_row=1, max_row=1), 1):
+            for cell in col:
+              cell.fill = header_fill
+              cell.font = header_font
+              cell.alignment = Alignment(
+                  horizontal="center", vertical="center", wrap_text=True
+              )
+
+          # ضبط الـ Wrap Text وعرض الأعمدة لجميع الخلايا
+          for col in worksheet.columns:
+            max_len = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+              cell.alignment = Alignment(
+                  vertical="center", wrap_text=True, horizontal="center"
+              )
+              if cell.row > 1 and cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+            worksheet.column_dimensions[col_letter].width = max(
+                max_len + 3, 15
+            )
+
         processed_data = output.getvalue()
 
         st.download_button(
