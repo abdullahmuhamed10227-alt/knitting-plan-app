@@ -20,13 +20,11 @@ def fix_reversed_text(val):
     return val
   s = str(val).strip()
   if s:
-    # إزالة أي نزول سطر داخلي وجعله في سطر واحد أفقي
     s = s.replace("\n", " ").replace("\r", " ")
     return s[::-1]
   return s
 
 
-# دالة لتنظيف النصوص العادية وجعلها في سطر واحد
 def clean_text_single_line(val):
   if pd.isna(val):
     return val
@@ -60,7 +58,12 @@ if uploaded_file is not None:
               headers = table[0]
               rows = table[1:]
             else:
-              rows = table[1:] if table[0] == headers else table
+              rows = [
+                  row
+                  for row in table[1:]
+                  if row != headers
+                  and not any("Work Order" in str(cell) for cell in row)
+              ]
             all_rows.extend(rows)
 
       if all_rows and headers:
@@ -95,7 +98,6 @@ if uploaded_file is not None:
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
 
-      # تنظيف كل الأعمدة لضمان عدم وجود نزول لسطور متعددة داخل الخلية الواحدة
       for col in df.columns:
         if col in ["Machine", "Gauge_Specs"]:
           df[col] = df[col].apply(fix_reversed_text)
@@ -119,7 +121,6 @@ if uploaded_file is not None:
 
         df_sorted = df.sort_values(by=sort_cols)
 
-        # ترتيب الأعمدة لتكون مطابقة تماماً للموقع
         priority_cols = ["Gauge_Specs", "Machine"]
         if seq_col and seq_col in df_sorted.columns:
           priority_cols.append(seq_col)
@@ -132,10 +133,16 @@ if uploaded_file is not None:
         final_columns_order = priority_cols + other_cols
         df_sorted = df_sorted[final_columns_order]
 
+        # 📌 عداد أمان دائم ومميز يوضح إجمالي السطور بدقة
+        total_rows = len(df_sorted)
+        st.success(
+            f"✅ تم بنجاح استخراج وترتيب كافة البيانات | إجمالي عدد السطور:"
+            f" **{total_rows}** صف"
+        )
+
         st.write("### 📊 معاينة البيانات بعد التصحيح الكامل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تصدير إلى Excel مع جعل كل خلية في سطر واحد أفقي (بدون تكسير رأسي)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
           df_sorted.to_excel(
@@ -160,7 +167,6 @@ if uploaded_file is not None:
                   horizontal="center", vertical="center", wrap_text=False
               )
 
-          # جعل جميع الخلايا في سطر واحد أفقي بدون التفاف (wrap_text=False) وتوسيع الأعمدة تلقائياً
           for col in worksheet.columns:
             max_len = 0
             col_letter = col[0].column_letter
@@ -170,7 +176,6 @@ if uploaded_file is not None:
               )
               if cell.value:
                 max_len = max(max_len, len(str(cell.value)))
-            # ضبط عرض العمود بناءً على أطول نص ليظهر كاملاً في سطر واحد
             worksheet.column_dimensions[col_letter].width = max(
                 min(max_len + 4, 60), 18
             )
