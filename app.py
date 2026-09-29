@@ -14,7 +14,6 @@ st.write(
     " والكميات."
 )
 
-# رفع الملف (يدعم PDF و Excel)
 uploaded_file = st.file_uploader(
     "اختر ملف خطة الإنتاج الحقيقي (PDF أو Excel)", type=["pdf", "xlsx", "csv"]
 )
@@ -24,45 +23,63 @@ if uploaded_file is not None:
 
   try:
     df = None
-    # 1. لو الملف Excel أو CSV
     if uploaded_file.name.endswith(".xlsx"):
       df = pd.read_excel(uploaded_file)
     elif uploaded_file.name.endswith(".csv"):
       df = pd.read_csv(uploaded_file)
 
-    # 2. لو الملف PDF (استخراج الجداول الحقيقية من كل الصفحات)
     elif uploaded_file.name.endswith(".pdf"):
-      all_data = []
+      all_rows = []
+      headers = None
+
       with pdfplumber.open(uploaded_file) as pdf:
         for page in pdf.pages:
           table = page.extract_table()
           if table:
-            all_data.extend(table)
+            # لو دي أول مرة نجيب الـ headers بناخدها أول صف
+            if headers is None:
+              headers = table[0]
+              rows = table[1:]
+            else:
+              rows = table[1:] if table[0] == headers else table
+            all_rows.extend(rows)
 
-      if all_data:
-        # أول صف يعتبر هو عناوين الأعمدة (Headers)
-        headers = all_data[0]
-        rows = all_data[1:]
-        df = pd.DataFrame(rows, columns=headers)
+      if all_rows and headers:
+        # معالجة الأعمدة المكررة لمنع حدوث خطأ
+        clean_headers = []
+        seen = {}
+        for h in headers:
+          h_str = str(h).strip() if h else "col"
+          if h_str in seen:
+            seen[h_str] += 1
+            clean_headers.append(f"{h_str}_{seen[h_str]}")
+          else:
+            seen[h_str] = 0
+            clean_headers.append(h_str)
+
+        df = pd.DataFrame(all_rows, columns=clean_headers)
       else:
         st.warning(
-            "لم يتم العثور على جداول واضحة داخل ملف الـ PDF. يرجى التأكد من أن"
-            " الملف يحتوي على جداول نصية."
+            "لم يتم العثور على جداول واضحة داخل ملف الـ PDF. تأكد من تنسيق"
+            " الملف."
         )
 
     if df is not None and not df.empty:
-      # تنظيف أسماء الأعمدة لإزالة المسافات الزائدة
+      # تنظيف أسماء الأعمدة وتنظيف القيم الفارغة
       df.columns = [str(col).strip() for col in df.columns]
 
-      # البحث عن عمود أمر الشغل والترتيب بغض النظر عن المسافات
+      # البحث عن عمود أمر الشغل
       wo_col = next(
-          (col for col in df.columns if "Work Order" in col or "Work_Order" in col),
+          (
+              col
+              for col in df.columns
+              if "Work Order" in col or "Work_Order" in col
+          ),
           None,
       )
       seq_col = next((col for col in df.columns if "Seq" in col), None)
 
       if wo_col:
-        # فرز البيانات وترتيبها بناءً على أمر الشغل
         if seq_col:
           df_sorted = df.sort_values(by=[wo_col, seq_col])
         else:
@@ -71,7 +88,6 @@ if uploaded_file is not None:
         st.write("### 📊 معاينة البيانات الحقيقية بعد إعادة الهيكلة:")
         st.dataframe(df_sorted, use_container_width=True)
 
-        # زر تحميل الملف الناتج بصيغة Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
           df_sorted.to_excel(writer, index=False, sheet_name="Restructured_Plan")
@@ -87,8 +103,7 @@ if uploaded_file is not None:
         )
       else:
         st.error(
-            "لم يتم العثور على عمود الـ Work Order في الملف المرفوع. تأكد من"
-            " تطابق أسماء الأعمدة."
+            "لم يتم العثور على عمود الـ Work Order بأسماء الأعمدة المستخرجة."
         )
         st.dataframe(df)
 
