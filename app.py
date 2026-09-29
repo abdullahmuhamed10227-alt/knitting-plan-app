@@ -9,27 +9,19 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج وتصحيح اتجاهات النصوص والأرقام"
-    " للماكينات بدقة."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج وتصحيح اتجاهات أرقام الماكينات"
+    " المعكوسة تلقائياً."
 )
 
 
-# دالة لتصحيح اتجاه النصوص والأرقام المقلوبة للماكينات إن وجدت
-def fix_text_direction(val):
+# دالة ذكية لتصحيح اتجاه أرقام الماكينات المعكوسة من الـ PDF
+def fix_machine_direction(val):
   if pd.isna(val):
     return val
   s = str(val).strip()
-  # لو النص يحتوي على حروف وأرقام وعاكس اتجاهه، نعكسه ليعود بالشكل الصحيح
-  # (مثلاً لو النص يبدأ برقم وينتهي بحرف بشكل مقلوب)
-  if any(c.isalpha() for c in s) and any(c.isdigit() for c in s):
-    # لو النص مقلوب تماماً (مثلاً انعكاس الكلمة)
-    # نقوم بعمل انعكاس لو النص مسجل بطريقة انعكاس الحروف العربية/الإنجليزية المختلطة
-    parts = s.split()
-    fixed_parts = []
-    for p in parts:
-      # إذا كانت النبرة منعكسة (مثل رقم في الآخر وهو أصله في الأول)
-      fixed_parts.append(p)
-    return " ".join(fixed_parts)
+  # لو الكود يبدأ برقم وينتهي بحرف (مثل 1702M أو 4512T)، فهو معكوس ويحتاج تعديل الاتجاه
+  if s and s[0].isdigit() and s[-1].isalpha():
+    return s[::-1]
   return s
 
 
@@ -94,14 +86,9 @@ if uploaded_file is not None:
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
 
-      # تصحيح الانعكاس في عمود الماكينة لو موجود
+      # تطبيق دالة تصحيح الاتجاه المعكوس على أعمدة الماكينات
       if "Machine" in df.columns:
-        # تصحيح اتجاه النصوص المعكوسة في الماكينات بقلب النص لو كان مخزناً بعكس الاتجاه
-        df["Machine"] = df["Machine"].apply(
-            lambda x: str(x)[::-1]
-            if str(x).endswith("T") and not str(x).startswith("T")
-            else str(x)
-        )
+        df["Machine"] = df["Machine"].apply(fix_machine_direction)
 
       wo_col = next(
           (
@@ -120,20 +107,20 @@ if uploaded_file is not None:
 
         df_sorted = df.sort_values(by=sort_cols)
 
-        st.write("### 📊 معاينة البيانات بعد تصحيح أرقام الماكينات وترتيبها:")
+        st.write("### 📊 معاينة البيانات بعد الضبط النهائي للماكينات:")
         st.dataframe(df_sorted, use_container_width=True)
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
           df_sorted.to_excel(
-              writer, index=False, sheet_name="Corrected_Knitting_Plan"
+              writer, index=False, sheet_name="Final_Corrected_Plan"
           )
         processed_data = output.getvalue()
 
         st.download_button(
-            label="📥 تحميل الملف النهائي المصحح والمرتب (Excel)",
+            label="📥 تحميل الملف النهائي مرتباً وخالياً من الأخطاء (Excel)",
             data=processed_data,
-            file_name="Corrected_Knitting_Plan.xlsx",
+            file_name="Final_Perfect_Knitting_Plan.xlsx",
             mime=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ),
