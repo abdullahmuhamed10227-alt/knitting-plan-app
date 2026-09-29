@@ -36,7 +36,6 @@ if uploaded_file is not None:
         for page in pdf.pages:
           table = page.extract_table()
           if table:
-            # لو دي أول مرة نجيب الـ headers بناخدها أول صف
             if headers is None:
               headers = table[0]
               rows = table[1:]
@@ -45,7 +44,6 @@ if uploaded_file is not None:
             all_rows.extend(rows)
 
       if all_rows and headers:
-        # معالجة الأعمدة المكررة لمنع حدوث خطأ
         clean_headers = []
         seen = {}
         for h in headers:
@@ -58,6 +56,16 @@ if uploaded_file is not None:
             clean_headers.append(h_str)
 
         df = pd.DataFrame(all_rows, columns=clean_headers)
+
+        # استبعاد الأعمدة الوهمية أو الزائدة التي تبدأ بـ col أو غير مسمى
+        valid_cols = [
+            c
+            for c in df.columns
+            if not c.startswith("col") and c != "None" and c != ""
+        ]
+        if valid_cols:
+          df = df[valid_cols]
+
       else:
         st.warning(
             "لم يتم العثور على جداول واضحة داخل ملف الـ PDF. تأكد من تنسيق"
@@ -65,10 +73,8 @@ if uploaded_file is not None:
         )
 
     if df is not None and not df.empty:
-      # تنظيف أسماء الأعمدة وتنظيف القيم الفارغة
       df.columns = [str(col).strip() for col in df.columns]
 
-      # البحث عن عمود أمر الشغل
       wo_col = next(
           (
               col
@@ -85,7 +91,7 @@ if uploaded_file is not None:
         else:
           df_sorted = df.sort_values(by=[wo_col])
 
-        st.write("### 📊 معاينة البيانات الحقيقية بعد إعادة الهيكلة:")
+        st.write("### 📊 معاينة البيانات بعد تنظيفها وإعادة هيكلتها:")
         st.dataframe(df_sorted, use_container_width=True)
 
         output = io.BytesIO()
@@ -96,7 +102,7 @@ if uploaded_file is not None:
         st.download_button(
             label="📥 تحميل الملف الجديد بالكامل مرتباً (Excel)",
             data=processed_data,
-            file_name="Real_Restructured_Knitting_Plan.xlsx",
+            file_name="Clean_Restructured_Plan.xlsx",
             mime=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ),
