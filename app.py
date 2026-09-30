@@ -14,7 +14,7 @@ st.set_page_config(
 st.title("🧵 النظام المتكامل لإدارة وتتبع خطط التريكو (Plan & Tracking Integration)")
 st.write(
     "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم مطابقة"
-    " وجلب كافة تفاصيل **ملف التراك (شيت OVER VIEW بعد توريث الأوردرات)** لكل ماكينة بدقة تامة وبدون أي نقص."
+    " وجلب كافة تفاصيل **ملف التراك (شيت OVER VIEW)** لكل ماكينة بدقة تامة وبدون أي نقص."
 )
 
 
@@ -44,7 +44,7 @@ with col_up2:
   track_file = st.file_uploader("2️⃣ اختر ملف تتبع الماكينات الفعلي (Excel)", type=["xlsx", "xls", "csv"])
 
 if plan_file is not None and track_file is not None:
-  st.success("✅ تم رفع الملفين بنجاح! جاري الدمج والمطابقة الشاملة لكافة الأعمدة...")
+  st.success("✅ تم رفع الملفين بنجاح! جاري الدمج والمطابقة بدقة متناهية...")
 
   try:
     # 📌 الخطوة الأولى: معالجة واستخراج جدول البلان (PDF)
@@ -174,7 +174,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) مع توريث الأوردرات (ffill)
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) والاعتماد على الهيكل البنيوي الصحيح
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -184,48 +184,58 @@ if plan_file is not None and track_file is not None:
             if s.strip().upper() == "OVER VIEW":
               sheet_to_use = s
               break
-          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use)
+          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=None)
 
-        # ضبط هيدر شيت التراك من الصف الأول
-        if df_track.iloc[0].astype(str).str.contains("Machine NO|Work ORDER").any():
-          df_track.columns = [str(c).strip() for c in df_track.iloc[0].values]
-          df_track = df_track.iloc[1:].reset_index(drop=True)
-        else:
-          df_track.columns = [str(c).strip() for c in df_track.columns]
+        # استخراج الهيدر من الصف رقم 0
+        track_headers = [str(c).strip() for c in df_track.iloc[0].values]
+        df_track_data = df_track.iloc[1:].copy()
+        df_track_data.columns = track_headers
 
-        # توريث القيم المدمجة رأسياً في الإكسيل (مثل Work ORDER) لضمان عدم وجود خلايا فارغة
-        df_track = df_track.ffill()
+        # توريث أوردرات التشغيل (Work ORDER) رأسياً لضمان عدم وجود خلايا فارغة في التراك
+        if "Work ORDER" in df_track_data.columns:
+          # إذا كان هناك أكثر من عمود باسم Work ORDER، نأخذ الأول
+          if isinstance(df_track_data["Work ORDER"], pd.DataFrame):
+            df_track_data.iloc[:, 2] = df_track_data.iloc[:, 2].ffill()
+          else:
+            df_track_data["Work ORDER"] = df_track_data["Work ORDER"].ffill()
 
-        track_mach_col = next((c for c in df_track.columns if "machine no" in c.lower() or c.lower() == "machine no."), df_track.columns[4] if len(df_track.columns) > 4 else None)
-
+        # بناء قاموس التتبع للماكينات بالاعتماد على عمود رقم الماكينة (Machine NO.)
         track_data_dict = {}
-        for _, row in df_track.iterrows():
-          raw_m_id = str(row.get(track_mach_col, "")).strip()
-          if raw_m_id and raw_m_id != "nan":
-            m_id_clean = "".join(raw_m_id.split()).upper()
-            row_dict = {str(k).strip(): (v if pd.notna(v) else "") for k, v in row.items() if pd.notna(k)}
-            track_data_dict[m_id_clean] = row_dict
+        for _, row in df_track_data.iterrows():
+          # البحث عن قيمة الماكينة (غالباً في العمود رقم 4 'Machine NO.')
+          m_id_raw = ""
+          for idx, val in enumerate(row.values):
+            val_str = str(val).strip()
+            if val_str.startswith("M") and len(val_str) <= 6:
+              m_id_raw = val_str
+              break
+          
+          if not m_id_raw and len(row.values) > 4:
+            m_id_raw = str(row.values[4]).strip()
 
-        track_columns = []
-        if track_data_dict:
-          first_key = list(track_data_dict.keys())[0]
-          track_columns = [col for col in track_data_dict[first_key].keys() if col != track_mach_col]
+          if m_id_raw and m_id_raw != "nan":
+            m_clean = "".join(m_id_raw.split()).upper()
+            row_dict = {str(k).strip(): (v if pd.notna(v) else "") for k, v in row.items() if pd.notna(k)}
+            track_data_dict[m_clean] = row_dict
+
+        # إضافة كافة أعمدة ملف التراك كأعمدة جديدة في نهاية جدول البلان
+        track_columns = [c for c in track_headers if c and c != "nan" and c != "Machine NO."]
 
         for t_col in track_columns:
           col_values = []
           for _, row in df_sorted.iterrows():
             raw_m_num = str(row.get("Machine", "")).strip()
-            m_num_clean = "".join(raw_m_num.split()).upper()
+            m_clean = "".join(raw_m_num.split()).upper()
             
-            if m_num_clean in track_data_dict:
-              val = track_data_dict[m_num_clean].get(t_col, "")
+            if m_clean in track_data_dict:
+              val = track_data_dict[m_clean].get(t_col, "")
               col_values.append(val if val != "" else "-")
             else:
               col_values.append("غير متوفر بالتراك")
           df_sorted[f"Track_{t_col}"] = col_values
 
         st.success(
-            f"✅ تم دمج خطة الإنتاج مع كافة تفاصيل وأعمدة ملف التراك (بعد توريث الأوردرات) بنجاح تـام! | إجمالي السطور: **{len(df_sorted)}** صف"
+            f"✅ تم دمج خطة الإنتاج مع كافة تفاصيل وأعمدة ملف التراك بدقة تامة ومرتبة مثل الشิล الأصلي! | إجمالي السطور: **{len(df_sorted)}** صف"
         )
         st.write("### 📊 معاينة الجدول النهائي المدمج بكافة التفاصيل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
