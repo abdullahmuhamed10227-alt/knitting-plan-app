@@ -13,8 +13,8 @@ st.set_page_config(
 
 st.title("🧵 النظام المتكامل لإدارة وتتبع خطط التريكو (Plan & Tracking Integration)")
 st.write(
-    "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم جلب سائر"
-    " **أعمدة وتفاصيل ملف التراك (شيت OVER VIEW)** وإضافتها كاملة لملف الإكسيل بدقة."
+    "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم مطابقة"
+    " وجلب كافة تفاصيل **ملف التراك (شيت OVER VIEW)** لكل ماكينة بدقة تامة وبدون أي نقص."
 )
 
 
@@ -44,7 +44,7 @@ with col_up2:
   track_file = st.file_uploader("2️⃣ اختر ملف تتبع الماكينات الفعلي (Excel)", type=["xlsx", "xls", "csv"])
 
 if plan_file is not None and track_file is not None:
-  st.success("✅ تم رفع الملفين بنجاح! جاري الدمج والمطابقة الشاملة لكافة الأعمدة...")
+  st.success("✅ تم رفع الملفين بنجاح! جاري الدمج والمطابقة الدقيقة لكافة الماكينات...")
 
   try:
     # 📌 الخطوة الأولى: معالجة واستخراج جدول البلان (PDF)
@@ -174,7 +174,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) بكامل تفاصيله
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) وتنظيف أرقام الماكينات بدقة
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -197,10 +197,12 @@ if plan_file is not None and track_file is not None:
 
         track_data_dict = {}
         for _, row in df_track.iterrows():
-          m_id = str(row.get(track_mach_col, "")).strip().upper() if track_mach_col else ""
-          if m_id and m_id != "NAN" and m_id.startswith("M"):
+          raw_m_id = str(row.get(track_mach_col, "")).strip()
+          if raw_m_id and raw_m_id != "nan":
+            # توحيد صيغة رقم الماكينة (إزالة المسافات وتحويلها لكابتل لضمان التطابق التام)
+            m_id_clean = "".join(raw_m_id.split()).upper()
             row_dict = {str(k).strip(): (v if pd.notna(v) else "") for k, v in row.items() if pd.notna(k)}
-            track_data_dict[m_id] = row_dict
+            track_data_dict[m_id_clean] = row_dict
 
         track_columns = []
         if track_data_dict:
@@ -210,11 +212,14 @@ if plan_file is not None and track_file is not None:
         for t_col in track_columns:
           col_values = []
           for _, row in df_sorted.iterrows():
-            m_num = str(row.get("Machine", "")).strip().upper()
-            if m_num in track_data_dict:
-              col_values.append(track_data_dict[m_num].get(t_col, ""))
+            raw_m_num = str(row.get("Machine", "")).strip()
+            m_num_clean = "".join(raw_m_num.split()).upper()
+            
+            if m_num_clean in track_data_dict:
+              val = track_data_dict[m_num_clean].get(t_col, "")
+              col_values.append(val if val != "" else "-")
             else:
-              col_values.append("-")
+              col_values.append("غير متوفر بالتراك")
           df_sorted[f"Track_{t_col}"] = col_values
 
         st.success(
@@ -224,7 +229,7 @@ if plan_file is not None and track_file is not None:
         st.write("### 📊 معاينة الجدول النهائي المدمج بكافة التفاصيل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # 📌 تصدير إلى Excel بكل الأعمدة والتنسيق المطلوب
+        # 📌 تصدير إلى Excel مع الدمج والتنسيق
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
@@ -289,7 +294,7 @@ if plan_file is not None and track_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # 📌 تصدير إلى PDF (باستخدام الأعمدة الأساسية لمنع انهيار التصميم مع الحفاظ على كل البيانات في الإكسيل)
+        # 📌 تصدير إلى PDF (للأعمدة الأساسية لمنع الضغط)
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
@@ -317,7 +322,6 @@ if plan_file is not None and track_file is not None:
             alignment=1,
         )
 
-        # اختيار الأعمدة الأساسية فقط للـ PDF لتجنب الضغط الهائل
         pdf_cols = [c for c in df_sorted.columns if not c.startswith("Track_") or c in ["Track_Work ORDER", "Track_ON / OFF", "Track_Yarn 1 LOT"]]
         df_pdf = df_sorted[pdf_cols]
 
