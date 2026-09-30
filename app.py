@@ -1,20 +1,16 @@
 import io
 import pandas as pd
-import pdfplumber
 import streamlit as st
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
-from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
-    page_title="Knitting Plan Restructurer", page_icon="🧵", layout="wide"
+    page_title="Machine Tracking & Status Restructurer", page_icon="🧵", layout="wide"
 )
 
-st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
+st.title("🧵 نظام إدارة وتتبع حالة الماكينات (Machine Tracking Restructurer)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج، تنقية الأعمدة، دمج خلايا أمر"
-    " الشغل، وإضافة تقرير حالة وتتبع الماكينات في نهاية الشيت."
+    "هذا التطبيق مخصص لرفع ملف تتبع الماكينات (MC Tracking)، تنظيمه، تصحيح"
+    " اتجاهات النصوص، وإضافة تقرير حالة تشغيل الماكينة والأوردر والمواصفات في"
+    " نهاية الشيت بدقة."
 )
 
 
@@ -37,160 +33,100 @@ def clean_text_single_line(val):
 
 
 uploaded_file = st.file_uploader(
-    "اختر ملف خطة الإنتاج أو التتبع (PDF أو Excel)", type=["pdf", "xlsx", "csv"]
+    "اختر ملف تتبع الماكينات الفعلي (Excel)", type=["xlsx", "csv"]
 )
 
 if uploaded_file is not None:
-  st.success("تم رفع الملف بنجاح! جاري معالجة البيانات وتحديث الأعمدة...")
+  st.success("تم رفع ملف التراك بنجاح! جاري معالجة البيانات وتحديث الأعمدة...")
 
   try:
     df = None
     if uploaded_file.name.endswith(".xlsx"):
       xls = pd.ExcelFile(uploaded_file)
-      # قراءة الشيت الأول افتراضياً
-      df = pd.read_excel(uploaded_file, sheet_name=xls.sheet_names[0])
+      # البحث عن شيت التراك المناسب
+      sheet_to_use = xls.sheet_names[0]
+      for s in xls.sheet_names:
+        if "tracking" in s.lower():
+          sheet_to_use = s
+          break
 
-      # التحقق إذا كان ملف تتبع (Tracking) يحتوي على صف عنوان مكرر أو هيدر في الصف الأول
-      if "Unnamed" in str(df.columns[1]) or df.iloc[0].astype(str).str.contains("Work ORDER|Machine NO").any():
-        # إعادة تعيين الهيدر من الصف الأول
-        df.columns = df.iloc[0]
-        df = df.iloc[1:].reset_index(drop=True)
+      df = pd.read_excel(uploaded_file, sheet_name=sheet_to_use)
+
+      # تنظيف وتحديد الهيدر الصحيح إذا كان ملف تراك يحتوي على صفوف علوية
+      for idx, row in df.head(10).iterrows():
+        row_str = " ".join(row.astype(str).values).lower()
+        if "mac. no" in row_str or "machine no" in row_str or "running workorder" in row_str:
+          df.columns = row.values
+          df = df.iloc[idx + 1 :].reset_index(drop=True)
+          break
 
     elif uploaded_file.name.endswith(".csv"):
       df = pd.read_csv(uploaded_file)
 
-    elif uploaded_file.name.endswith(".pdf"):
-      all_rows = []
-      headers = None
-
-      with pdfplumber.open(uploaded_file) as pdf:
-        for page in pdf.pages:
-          table = page.extract_table()
-          if table:
-            if headers is None:
-              headers = table[0]
-              rows = table[1:]
-            else:
-              rows = [
-                  row
-                  for row in table[1:]
-                  if row != headers
-                  and not any("Work Order" in str(cell) for cell in row)
-              ]
-            all_rows.extend(rows)
-
-      if all_rows and headers:
-        clean_headers = []
-        seen = {}
-        for h in headers:
-          h_str = str(h).strip() if h else ""
-          if h_str in seen:
-            seen[h_str] += 1
-            clean_headers.append(f"{h_str}_{seen[h_str]}")
-          else:
-            seen[h_str] = 0
-            clean_headers.append(h_str if h_str else f"Col_{seen[h_str]}")
-
-        df = pd.DataFrame(all_rows, columns=clean_headers)
-
     if df is not None and not df.empty:
-      df.columns = [str(col).strip() for col in df.columns]
+      # تنظيف أسماء الأعمدة وحذف الأعمدة الفارغة تماماً
+      df.columns = [str(c).strip() for c in df.columns if pd.notna(c) and str(c).strip() != "nan"]
+      df = df.dropna(how="all")
 
-      # حذف أعمدة Start, Finish, Acs إن وجدت لعدم الحاجة إليها
-      cols_to_drop = []
+      # تنظيف النصوص وعكسها إذا لزم الأمر
       for col in df.columns:
-        col_lower = col.lower()
-        if (
-            "start" in col_lower
-            or "finish" in col_lower
-            or col_lower in ["acs.", "acs"]
-        ):
-          cols_to_drop.append(col)
-      if cols_to_drop:
-        df = df.drop(columns=cols_to_drop)
+        df[col] = df[col].apply(clean_text_single_line)
 
-      # تنظيف النصوص
-      for col in df.columns:
-        if "machine" in col.lower() or "gauge" in col.lower():
-          df[col] = df[col].apply(fix_reversed_text)
-        else:
-          df[col] = df[col].apply(clean_text_single_line)
-
-      # البحث عن أعمدة الـ Work Order والـ Machine
-      wo_col = next(
-          (
-              col
-              for col in df.columns
-              if "work order" in col.lower() or "work_order" in col.lower()
-          ),
-          None,
-      )
+      # البحث عن الأعمدة الأساسية (الماكينة، الأوردر، العميل، الخيوط، إلخ)
       mach_col = next(
-          (
-              col
-              for col in df.columns
-              if "machine" in col.lower() or "machine no" in col.lower()
-          ),
-          None,
+          (c for c in df.columns if "mac" in c.lower() or "machine" in c.lower()),
+          df.columns[0] if len(df.columns) > 0 else None
       )
-      seq_col = next((col for col in df.columns if "seq" in col.lower()), None)
-      sample_col = next(
-          (col for col in df.columns if "sample" in col.lower()), None
+      wo_col = next(
+          (c for c in df.columns if "workorder" in c.lower() or "work order" in c.lower() or "running" in c.lower()),
+          None
       )
-      cust_col = next(
-          (col for col in df.columns if "customer" in col.lower() or "custmer" in col.lower()), None
-      )
-      proj_col = next(
-          (col for col in df.columns if "project" in col.lower()), None
-      )
+      cust_col = next((c for c in df.columns if "customer" in c.lower()), None)
+      fabric_col = next((c for c in df.columns if "fabric" in c.lower() or "code" in c.lower()), None)
+      yarn_col = next((c for c in df.columns if "yarn" in c.lower() or "mix" in c.lower()), None)
 
-      if wo_col:
-        sort_cols = [wo_col]
-        if seq_col:
-          sort_cols.append(seq_col)
-        if mach_col and mach_col in df.columns:
-          sort_cols.append(mach_col)
+      if mach_col:
+        # ترتيب البيانات حسب رقم الماكينة
+        df_sorted = df.sort_values(by=mach_col).reset_index(drop=True)
 
-        df_sorted = df.sort_values(by=sort_cols)
+        # 📌 إضافة أعمدة الحالة والمواصفات في أخر الشيت على اليمين كما طلبت
+        def determine_status(row):
+          # فحص ما إذا كانت الماكينة شغالة أو واقفة بناءً على أوردر الشغل أو عمود الـ Fabric/Status
+          val_wo = str(row.get(wo_col, "")).strip() if wo_col else ""
+          row_text = " ".join([str(v) for v in row.values]).lower()
+          
+          if "closed" in row_text or "stop" in row_text or val_wo == "" or val_wo == "nan":
+            return "واقفة (Stopped)"
+          else:
+            return "شغالة (Running)"
 
-        # توحيد البيانات المشتركة لكل Work Order
-        shared_cols_to_merge = []
-        if sample_col:
-          shared_cols_to_merge.append(sample_col)
-        if cust_col:
-          shared_cols_to_merge.append(cust_col)
-        if proj_col:
-          shared_cols_to_merge.append(proj_col)
+        df_sorted["Machine_Status"] = df_sorted.apply(determine_status, axis=1)
 
-        for col in shared_cols_to_merge:
-          df_sorted[col] = df_sorted.groupby(wo_col)[col].transform(
-              lambda x: x.iloc[0] if not x.empty else ""
-          )
+        def create_summary_details(row):
+          m = row.get(mach_col, "N/A")
+          w = row.get(wo_col, "لا يوجد أوردر") if wo_col else "N/A"
+          c = row.get(cust_col, "-") if cust_col else "-"
+          f = row.get(fabric_col, "-") if fabric_col else "-"
+          y = row.get(yarn_col, "-") if yarn_col else "-"
+          status = row["Machine_Status"]
+          return f"الماكينة: {m} | الحالة: {status} | الأوردر: {w} | العميل: {c} | القماش: {f} | الغزل: {y}"
 
-        # 📌 إضافة عمود أخير في نهاية الشيت يوضح حالة الماكينة وتفاصيلها (Machine Summary & Status)
-        if mach_col:
-          def get_machine_summary(row):
-            m_name = row.get(mach_col, "Unknown")
-            w_ord = row.get(wo_col, "N/A")
-            status = "شغالة (Running)" if pd.notna(w_ord) and str(w_ord).strip() != "" else "واقفة (Stopped)"
-            return f"مكينة: {m_name} | الحالة: {status} | أوردر: {w_ord}"
-
-          df_sorted["Machine_Status_Summary"] = df_sorted.apply(get_machine_summary, axis=1)
+        df_sorted["Detailed_Status_Summary"] = df_sorted.apply(create_summary_details, axis=1)
 
         total_rows = len(df_sorted)
         st.success(
-            f"✅ تم معالجة الملف بنجاح وإضافة تقرير حالة الماكينات في نهاية الشيت | إجمالي السطور:"
-            f" **{total_rows}** صف"
+            f"✅ تم بنجاح معالجة ملف تتبع الماكينات وإضافة تقرير الحالة والمواصفات في أخر الشيت | إجمالي عدد الماكينات:"
+            f" **{total_rows}** ماكينة"
         )
 
-        st.write("### 📊 معاينة البيانات بعد التحديث:")
+        st.write("### 📊 معاينة جدول التتبع المحدث:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تصدير إلى Excel مع دمج الخلايا وتنسيق الأعمدة
+        # تجهيز ملف الإكسيل للتنزيل مع تنسيق الأعمده و Wrap Text
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
-              writer, index=False, sheet_name="Master_Tracking_Plan"
+              writer, index=False, sheet_name="Updated_MC_Tracking"
           )
           workbook = writer.book
           worksheet = workbook.active
@@ -213,10 +149,10 @@ if uploaded_file is not None:
           for col in worksheet.columns:
             col_letter = col[0].column_letter
             col_name = str(col[0].value).lower()
-            if "description" in col_name or "yarn" in col_name or "summary" in col_name:
-              worksheet.column_dimensions[col_letter].width = 40
-            elif "note" in col_name:
-              worksheet.column_dimensions[col_letter].width = 25
+            if "summary" in col_name or "yarn" in col_name or "mix" in col_name:
+              worksheet.column_dimensions[col_letter].width = 45
+            elif "status" in col_name:
+              worksheet.column_dimensions[col_letter].width = 20
             else:
               worksheet.column_dimensions[col_letter].width = 16
 
@@ -225,49 +161,21 @@ if uploaded_file is not None:
                   vertical="center", horizontal="center", wrap_text=True
               )
 
-          # دمج خلايا Work Order والبيانات المشتركة رأسياً
-          cols_to_merge_indices = []
-          for idx, col_name in enumerate(df_sorted.columns, start=1):
-            if col_name == wo_col or col_name in shared_cols_to_merge:
-              cols_to_merge_indices.append(idx)
-
-          if cols_to_merge_indices:
-            start_row = 2
-            while start_row <= worksheet.max_row:
-              wo_val = worksheet.cell(row=start_row, column=1).value
-              end_row = start_row
-              while end_row + 1 <= worksheet.max_row:
-                if worksheet.cell(row=end_row + 1, column=1).value == wo_val:
-                  end_row += 1
-                else:
-                  break
-
-              if end_row > start_row:
-                for col_idx in cols_to_merge_indices:
-                  worksheet.merge_cells(
-                      start_row=start_row,
-                      start_column=col_idx,
-                      end_row=end_row,
-                      end_column=col_idx,
-                  )
-              start_row = end_row + 1
-
         excel_data = excel_output.getvalue()
 
-        # زر التنزيل
         st.download_button(
-            label="📥 تحميل ملف التتبع المحدث والنهائي (Excel)",
+            label="📥 تحميل ملف تتبع الماكينات المحدث والنهائي (Excel)",
             data=excel_data,
-            file_name="Updated_Machine_Tracking_Plan.xlsx",
+            file_name="Updated_MC_Tracking_Report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
 
       else:
-        st.error("لم يتم العثور على عمود الـ Work Order في البيانات.")
+        st.error("لم يتم العثور على عمود رقم الماكينة في الملف.")
         st.dataframe(df, hide_index=True)
 
   except Exception as e:
-    st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
+    st.error(f"حدث خطأ أثناء معالجة ملف التتبع: {e}")
 else:
-  st.info("الرجاء رفع ملف التتبع (Excel أو PDF) للبدء.")
+  st.info("الرجاء رفع ملف تتبع الماكينات (MC Tracking Excel) للبدء.")
