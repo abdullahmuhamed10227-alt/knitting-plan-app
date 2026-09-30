@@ -4,7 +4,7 @@ import pdfplumber
 import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(
@@ -13,19 +13,17 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج وتصحيح وتعديل اتجاهات النصوص"
-    " والأرقام المعكوسة وتنسيق ملفات الإكسيل والـ PDF بدقة."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج هرمياً وتصحيح وتعديل اتجاهات"
+    " النصوص والأرقام المعكوسة وتنسيق ملفات الإكسيل والـ PDF بدقة."
 )
 
 
-# دالة عامة لتنظيف وعكس النصوص المعكوسة وتجنب أي رموز غريبة
 def fix_reversed_text(val):
   if pd.isna(val):
     return val
   s = str(val).strip()
   if s:
     s = s.replace("\n", " ").replace("\r", " ")
-    # استبدال أي حروف قد تسبب مشاكل في الترميز بالطباعة
     s = s.replace("İ", "I").replace("İ", "I")
     return s[::-1]
   return s
@@ -43,7 +41,7 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-  st.success("تم رفع الملف بنجاح! جاري معالجة البيانات وتصحيحها...")
+  st.success("تم رفع الملف بنجاح! جاري معالجة البيانات وتعديل الهيكل...")
 
   try:
     df = None
@@ -119,13 +117,39 @@ if uploaded_file is not None:
           None,
       )
       seq_col = next((col for col in df.columns if "seq" in col.lower()), None)
+      sample_col = next(
+          (col for col in df.columns if "sample" in col.lower()), None
+      )
+      cust_col = next(
+          (col for col in df.columns if "customer" in col.lower()), None
+      )
+      proj_col = next(
+          (col for col in df.columns if "project" in col.lower()), None
+      )
 
       if wo_col:
+        # ترتيب هرمي دقيق حسب أمر الشغل ثم السيكونس ثم الماكينة
         sort_cols = [wo_col]
         if seq_col:
           sort_cols.append(seq_col)
+        if "Machine" in df.columns:
+          sort_cols.append("Machine")
 
         df_sorted = df.sort_values(by=sort_cols)
+
+        # توحيد البيانات المشتركة (Sample, Customer, Project) لكل Work Order لتعكس الشكل المطلوب بالصورة
+        if sample_col:
+          df_sorted[sample_col] = df_sorted.groupby(wo_col)[
+              sample_col
+          ].transform(lambda x: x.iloc[0] if not x.empty else "")
+        if cust_col:
+          df_sorted[cust_col] = df_sorted.groupby(wo_col)[cust_col].transform(
+              lambda x: x.iloc[0] if not x.empty else ""
+          )
+        if proj_col:
+          df_sorted[proj_col] = df_sorted.groupby(wo_col)[proj_col].transform(
+              lambda x: x.iloc[0] if not x.empty else ""
+          )
 
         priority_cols = ["Gauge_Specs", "Machine"]
         if seq_col and seq_col in df_sorted.columns:
@@ -141,14 +165,14 @@ if uploaded_file is not None:
 
         total_rows = len(df_sorted)
         st.success(
-            f"✅ تم بنجاح استخراج وترتيب كافة البيانات | إجمالي عدد السطور:"
+            f"✅ تم بنجاح استخراج وترتيب الهيكل الهرمي | إجمالي عدد السطور:"
             f" **{total_rows}** صف"
         )
 
-        st.write("### 📊 معاينة البيانات بعد التصحيح الكامل:")
+        st.write("### 📊 معاينة البيانات بعد الهيكلة والضبط:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تجهيز زر الإكسيل مع ضبط عرض الأعمدة أوتوماتيكياً
+        # تصدير إلى Excel
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
@@ -185,9 +209,8 @@ if uploaded_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # تجهيز زر الـ PDF بتنسيق محسن (تجنب الحروف المطموسة، زيادة خط العناوين، ومنع تكسير الورك أوردر)
+        # تصدير إلى PDF
         pdf_output = io.BytesIO()
-        # استخدام مساحات هوامش ضيقة لإعطاء مساحة أوسع للجدول
         doc = SimpleDocTemplate(
             pdf_output,
             pagesize=landscape(A4),
@@ -224,13 +247,10 @@ if uploaded_file is not None:
           row_cells = []
           for val in row:
             val_str = str(val) if pd.notna(val) else ""
-            # حماية إضافية ضد أي رموز قد تظهر مربعات سوداء
             val_str = val_str.replace("İ", "I")
             row_cells.append(Paragraph(val_str, style_normal))
           table_data.append(row_cells)
 
-        # تحديد أعراض محددة ومناسبة لكل عمود في الـ PDF لضمان ظهور الـ Work Order في سطر واحد وبدون ضغط
-        # إجمالي عرض صفحة A4 العرضية حوالي 800 نقطة
         num_cols = len(df_sorted.columns)
         col_width = 810 / num_cols if num_cols > 0 else 50
 
@@ -274,7 +294,7 @@ if uploaded_file is not None:
         st.error(
             "لم يتم العثور على عمود الـ Work Order في الأعمدة المستخرجة."
         )
-        st.dataframe(df, hide_index, True)
+        st.dataframe(df, hide_index=True)
 
   except Exception as e:
     st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
