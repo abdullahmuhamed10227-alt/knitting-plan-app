@@ -13,9 +13,8 @@ st.set_page_config(
 
 st.title("🧵 النظام المتكامل لإدارة وتتبع خطط التريكو (Plan & Tracking Integration)")
 st.write(
-    "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم مطابقة"
-    " **ملف التراك (Excel - شيت OVER VIEW)** لإضافة حالة الماكينات الفعلية"
-    " والأوردرات والغزل بدقة شديدة."
+    "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم جلب سائر"
+    " **أعمدة وتفاصيل ملف التراك (شيت OVER VIEW)** وإضافتها كاملة لكل ماكينة بدقة."
 )
 
 
@@ -45,7 +44,7 @@ with col_up2:
   track_file = st.file_uploader("2️⃣ اختر ملف تتبع الماكينات الفعلي (Excel)", type=["xlsx", "xls", "csv"])
 
 if plan_file is not None and track_file is not None:
-  st.success("✅ تم رفع الملفين بنجاح! جاري الدمج والمطابقة بدقة...")
+  st.success("✅ تم رفع الملفين بنجاح! جاري الدمج والمطابقة الشاملة لكافة الأعمدة...")
 
   try:
     # 📌 الخطوة الأولى: معالجة واستخراج جدول البلان (PDF)
@@ -140,10 +139,7 @@ if plan_file is not None and track_file is not None:
       )
 
       if wo_col:
-        sort_cols = [wo_col]
-        if seq_col:
-          sort_cols.append(sort_cols) and sort_cols.append(seq_col) # Simplified
-          sort_cols = [wo_col, seq_col] if seq_col else [wo_col]
+        sort_cols = [wo_col, seq_col] if seq_col else [wo_col]
         if "Machine" in df_plan.columns:
           sort_cols.append("Machine")
 
@@ -178,7 +174,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) بدون المساس بالهيكل
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) بكامل أعمدته التفصيلية
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -188,77 +184,48 @@ if plan_file is not None and track_file is not None:
             if s.strip().upper() == "OVER VIEW":
               sheet_to_use = s
               break
-          
-          # قراءة البيانات مع اعتبار الصف رقم 0 هو الهيدر الفعلي
-          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=0)
+          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use)
 
-        # استخراج قاموس التتبع للماكينات بأمان تام من أعمدة شيت OVER VIEW
-        tracking_dict = {}
+        # ضبط هيدر شيت التراك من الصف الأول
+        if df_track.iloc[0].astype(str).str.contains("Machine NO|Work ORDER").any():
+          df_track.columns = [str(c).strip() for c in df_track.iloc[0].values]
+          df_track = df_track.iloc[1:].reset_index(drop=True)
+        else:
+          df_track.columns = [str(c).strip() for c in df_track.columns]
+
+        # البحث عن عمود رقم الماكينة في التراك
+        track_mach_col = next((c for c in df_track.columns if "machine no" in c.lower() or c.lower() == "machine no."), df_track.columns[4] if len(df_track.columns) > 4 else None)
+
+        # بناء قاموس يحفظ كافة بيانات كل ماكينة من ملف التراك
+        track_data_dict = {}
         for _, row in df_track.iterrows():
-          try:
-            # البحث عن رقم الماكينة (عادة في العمود 4 أو العمود الذي يحتوي على M...)
-            m_id = ""
-            w_val = ""
-            y_lot = ""
-            y_ne = ""
-            on_off = "ON"
+          m_id = str(row.get(track_mach_col, "")).strip() if track_mach_col else ""
+          if m_id and m_id != "nan" and m_id.startswith("M"):
+            # تخزين الصف بالكامل كمفردات لكل ماكينة
+            row_dict = {str(k).strip(): (v if pd.notna(v) else "") for k, v in row.items() if pd.notna(k)}
+            track_data_dict[m_id] = row_dict
 
-            for val in row.values:
-              val_str = str(val).strip()
-              if val_str.startswith("M") and len(val_str) <= 6:
-                m_id = val_str
-                break
-            
-            if m_id:
-              # محاولة استخراج الأوردر والغزل وحالة ON/OFF من نفس الصف
-              row_vals = [str(v) for v in row.values if pd.notna(v)]
-              
-              for v in row_vals:
-                if "-" in v and len(v) >= 7 and ("/" in v or v[:2].isdigit()):
-                  w_val = v
-                if v.upper() in ["ON", "OFF"]:
-                  on_off = v.upper()
+        # إضافة جميع أعمدة التراك كأعمدة جديدة في نهاية جدول البلان قصاد كل ماكينة
+        track_columns = []
+        if track_data_dict:
+          first_key = list(track_data_dict.keys())[0]
+          track_columns = [col for col in track_data_dict[first_key].keys() if col != track_mach_col]
 
-              # أخذ أول يارن (Yarn 1) لو موجود
-              if len(row_vals) > 6:
-                y_lot = row_vals[6] if len(row_vals) > 6 else ""
-                y_ne = row_vals[7] if len(row_vals) > 7 else ""
-
-              status_str = "شغالة (Running)" if on_off == "ON" else "واقفة (Stopped)"
-              yarn_details = f"{y_lot} ({y_ne})" if y_lot and y_ne else (y_lot or "-")
-
-              tracking_dict[m_id] = {
-                  "Live_Status": status_str,
-                  "Live_Order": w_val if w_val else "لا يوجد أوردر",
-                  "Live_Yarn": yarn_details
-              }
-          except:
-            continue
-
-        live_statuses = []
-        live_orders = []
-        live_yarns = []
-
-        for _, row in df_sorted.iterrows():
-          m_num = str(row.get("Machine", "")).strip()
-          if m_num in tracking_dict:
-            live_statuses.append(tracking_dict[m_num]["Live_Status"])
-            live_orders.append(tracking_dict[m_num]["Live_Order"])
-            live_yarns.append(tracking_dict[m_num]["Live_Yarn"])
-          else:
-            live_statuses.append("غير متوفر بالتراك")
-            live_orders.append("-")
-            live_yarns.append("-")
-
-        df_sorted["Actual_Machine_Status"] = live_statuses
-        df_sorted["Actual_Running_Order"] = live_orders
-        df_sorted["Actual_Yarn_Details"] = live_yarns
+        for t_col in track_columns:
+          col_values = []
+          for _, row in df_sorted.iterrows():
+            m_num = str(row.get("Machine", "")).strip()
+            if m_num in track_data_dict:
+              col_values.append(track_data_dict[m_num].get(t_col, ""))
+            else:
+              col_values.append("-")
+          df_sorted[f"Track_{t_col}"] = col_values
 
         st.success(
-            f"✅ تم دمج ومعالجة خطة الإنتاج مع ملف تتبع الماكينات بنجاح! | إجمالي"
+            f"✅ تم دمج خطة الإنتاج مع كافة تفاصيل وأعمدة ملف التراك بنجاح! | إجمالي"
             f" السطور: **{len(df_sorted)}** صف"
         )
-        st.write("### 📊 معاينة الجدول النهائي المدمج:")
+        st.write("### 📊 معاينة الجدول النهائي المدمج بكافة التفاصيل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
         # 📌 تصدير إلى Excel مع الدمج والتنسيق
@@ -288,10 +255,8 @@ if plan_file is not None and track_file is not None:
           for col in worksheet.columns:
             col_letter = col[0].column_letter
             col_name = str(col[0].value).lower()
-            if "description" in col_name or "yarn" in col_name or "summary" in col_name:
-              worksheet.column_dimensions[col_letter].width = 40
-            elif "status" in col_name:
-              worksheet.column_dimensions[col_letter].width = 20
+            if "description" in col_name or "yarn" in col_name or "track" in col_name:
+              worksheet.column_dimensions[col_letter].width = 30
             else:
               worksheet.column_dimensions[col_letter].width = 16
 
@@ -343,14 +308,14 @@ if plan_file is not None and track_file is not None:
         style_normal = ParagraphStyle(
             name="Normal_Table",
             fontName="Helvetica",
-            fontSize=6.5,
-            leading=8,
+            fontSize=6,
+            leading=7,
             alignment=1,
         )
         style_header = ParagraphStyle(
             name="Header_Table",
             fontName="Helvetica-Bold",
-            fontSize=7.5,
+            fontSize=7,
             leading=9,
             textColor=colors.whitesmoke,
             alignment=1,
@@ -380,8 +345,8 @@ if plan_file is not None and track_file is not None:
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
             ])
         )
 
@@ -392,9 +357,9 @@ if plan_file is not None and track_file is not None:
         col1, col2 = st.columns(2)
         with col1:
           st.download_button(
-              label="📥 تحميل التقرير المتكامل النهائي (Excel)",
+              label="📥 تحميل التقرير الشامل النهائي (Excel)",
               data=excel_data,
-              file_name="Integrated_Knitting_Plan_Tracking.xlsx",
+              file_name="Integrated_Full_Knitting_Plan_Tracking.xlsx",
               mime=(
                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               ),
@@ -402,9 +367,9 @@ if plan_file is not None and track_file is not None:
           )
         with col2:
           st.download_button(
-              label="📥 تحميل التقرير المتكامل (PDF)",
+              label="📥 تحميل التقرير الشامل (PDF)",
               data=pdf_data,
-              file_name="Integrated_Knitting_Plan_Tracking.pdf",
+              file_name="Integrated_Full_Knitting_Plan_Tracking.pdf",
               mime="application/pdf",
               use_container_width=True,
           )
@@ -417,4 +382,4 @@ if plan_file is not None and track_file is not None:
   except Exception as e:
     st.error(f"حدث خطأ أثناء المعالجة والدمج: {e}")
 else:
-  st.info("الرجاء رفع **الملفين معاً** (ملف خطة الإنتاج PDF + ملف تتبع الماكينات Excel) للبدء في الدمج والمعالجة.")
+  st.info("الرجاء رفع **الملفين معاً** (ملف خطة الإنتاج PDF + ملف تتبع الماكينات Excel) للبدء في الدمج والمعالجة الشاملة.")
