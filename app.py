@@ -21,7 +21,7 @@ st.write(
 
 def fix_reversed_text(val):
   if pd.isna(val):
-    return val
+    return ""
   s = str(val).strip()
   if s:
     s = s.replace("\n", " ").replace("\r", " ")
@@ -32,7 +32,7 @@ def fix_reversed_text(val):
 
 def clean_text_single_line(val):
   if pd.isna(val):
-    return val
+    return ""
   s = str(val).strip()
   return s.replace("\n", " ").replace("\r", " ")
 
@@ -177,7 +177,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (Excel) واستخراج بيانات حالة الماكينات الفعلية
+        # 📌 الخطوة الثانية: قراءة ملف التراك (Excel) واستخراج بيانات حالة الماكينات الفعلية بأمان
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -189,15 +189,15 @@ if plan_file is not None and track_file is not None:
               break
           df_track = pd.read_excel(track_file, sheet_name=sheet_to_use)
 
-          # تنظيف الهيدر في التراك
+          # تنظيف الهيدر في التراك بأمان تام
           for idx, row in df_track.head(10).iterrows():
-            row_str = " ".join(row.astype(str).values).lower()
+            row_str = " ".join([str(v) if pd.notna(v) else "" for v in row.values]).lower()
             if (
                 "mac. no" in row_str
                 or "machine no" in row_str
                 or "running workorder" in row_str
             ):
-              df_track.columns = row.values
+              df_track.columns = [str(v).strip() for v in row.values]
               df_track = df_track.iloc[idx + 1 :].reset_index(drop=True)
               break
 
@@ -235,7 +235,6 @@ if plan_file is not None and track_file is not None:
         )
 
         if track_mach_col:
-          # بناء قاموس (Dictionary) لكل ماكينة بحالتها من ملف التراك
           tracking_dict = {}
           for _, row in df_track.iterrows():
             m_id = str(row.get(track_mach_col, "")).strip()
@@ -243,7 +242,7 @@ if plan_file is not None and track_file is not None:
               w_val = str(row.get(track_wo_col, "")).strip() if track_wo_col else ""
               y_val = str(row.get(track_yarn_col, "")).strip() if track_yarn_col else ""
               
-              row_text = " ".join([str(v) for v in row.values]).lower()
+              row_text = " ".join([str(v) if pd.notna(v) else "" for v in row.values]).lower()
               if "closed" in row_text or "stop" in row_text or w_val == "" or w_val == "nan":
                 status = "واقفة (Stopped)"
               else:
@@ -255,7 +254,6 @@ if plan_file is not None and track_file is not None:
                   "Live_Yarn": y_val if y_val and y_val != "nan" else "-"
               }
 
-          # إيقاع حالة الماكينات الفعلية في أعمدة جديدة على اليمين في جدول البلان بناءً على رقم الماكينة
           live_statuses = []
           live_orders = []
           live_yarns = []
