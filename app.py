@@ -13,8 +13,8 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج ودمج خلايا أمر الشغل في الإكسيل"
-    " وتصدير الملفات بدقة عالية."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج، حذف الأعمدة الزائدة، وتفعيل"
+    " التنسيق الاحترافي (Wrap Text) للأعمدة الكبيرة في الإكسيل والـ PDF."
 )
 
 
@@ -41,7 +41,7 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-  st.success("تم رفع الملف بنجاح! جاري معالجة وتعديل الهيكل ودمج الخلايا...")
+  st.success("تم رفع الملف بنجاح! جاري تنقية الأعمدة وتنسيق الجداول...")
 
   try:
     df = None
@@ -101,6 +101,19 @@ if uploaded_file is not None:
 
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
+
+      # 📌 حذف الأعمدة غير المطلوبة (Start, Finish, Acs) إن وجدت
+      cols_to_drop = []
+      for col in df.columns:
+        col_lower = col.lower()
+        if (
+            "start" in col_lower
+            or "finish" in col_lower
+            or col_lower in ["acs.", "acs"]
+        ):
+          cols_to_drop.append(col)
+      if cols_to_drop:
+        df = df.drop(columns=cols_to_drop)
 
       for col in df.columns:
         if col in ["Machine", "Gauge_Specs"]:
@@ -168,14 +181,14 @@ if uploaded_file is not None:
 
         total_rows = len(df_sorted)
         st.success(
-            f"✅ تم بنجاح استخراج وترتيب الهيكل | إجمالي عدد السطور:"
+            f"✅ تم بنجاح تنقية الأعمدة وترتيب الهيكل | إجمالي عدد السطور:"
             f" **{total_rows}** صف"
         )
 
-        st.write("### 📊 معاينة البيانات بعد الهيكلة:")
+        st.write("### 📊 معاينة البيانات بعد التعديل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تصدير إلى Excel مع الدمج
+        # 📌 تصدير إلى Excel مع تحديد عرض ثابت للأعمدة الكبيرة وتفعيل Wrap Text
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
@@ -196,20 +209,27 @@ if uploaded_file is not None:
               cell.fill = header_fill
               cell.font = header_font
               cell.alignment = Alignment(
-                  horizontal="center", vertical="center", wrap_text=False
+                  horizontal="center", vertical="center", wrap_text=True
               )
 
+          # ضبط أعراض الأعمدة وتفعيل الـ Wrap Text للأعمدة التي تحتوى على نصوص طويلة
           for col in worksheet.columns:
-            max_len = 0
             col_letter = col[0].column_letter
+            col_name = str(col[0].value).lower()
+            # إعطاء مساحة أوسع ومميزة لأعمدة الوصف والخيوط
+            if "description" in col_name or "yarn" in col_name:
+              worksheet.column_dimensions[col_letter].width = 45
+            elif "note" in col_name:
+              worksheet.column_dimensions[col_letter].width = 25
+            else:
+              worksheet.column_dimensions[col_letter].width = 16
+
             for cell in col:
               cell.alignment = Alignment(
-                  vertical="center", horizontal="center", wrap_text=False
+                  vertical="center", horizontal="center", wrap_text=True
               )
-              if cell.value is not None:
-                max_len = max(max_len, len(str(cell.value)))
-            worksheet.column_dimensions[col_letter].width = max(max_len + 5, 15)
 
+          # دمج خلايا Work Order والبيانات المشتركة رأسياً
           cols_to_merge_indices = []
           for idx, col_name in enumerate(df_sorted.columns, start=1):
             if col_name == wo_col or col_name in shared_cols_to_merge:
@@ -238,7 +258,7 @@ if uploaded_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # تصدير إلى PDF
+        # 📌 تصدير إلى PDF بتنسيق منضبط ومهذب
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
@@ -253,15 +273,15 @@ if uploaded_file is not None:
         style_normal = ParagraphStyle(
             name="Normal_Table",
             fontName="Helvetica",
-            fontSize=7.5,
+            fontSize=7,
             leading=9,
             alignment=1,
         )
         style_header = ParagraphStyle(
             name="Header_Table",
             fontName="Helvetica-Bold",
-            fontSize=8.5,
-            leading=11,
+            fontSize=8,
+            leading=10,
             textColor=colors.whitesmoke,
             alignment=1,
         )
@@ -274,24 +294,35 @@ if uploaded_file is not None:
 
         for _, row in df_sorted.iterrows():
           row_cells = []
-          for val in row:
+          for col_name, val in zip(df_sorted.columns, row):
             val_str = str(val) if pd.notna(val) else ""
             val_str = val_str.replace("İ", "I")
             row_cells.append(Paragraph(val_str, style_normal))
           table_data.append(row_cells)
 
         num_cols = len(df_sorted.columns)
-        col_width = 810 / num_cols if num_cols > 0 else 50
+        # توزيع عريض ومخصص للأعمدة في الـ PDF لتفادي التداخل
+        col_widths = []
+        for col_name in df_sorted.columns:
+          c_low = str(col_name).lower()
+          if "description" in c_low or "yarn" in c_low:
+            col_widths.append(110)
+          elif "note" in c_low:
+            col_widths.append(70)
+          else:
+            col_widths.append(
+                (810 - 250) / (num_cols - 2) if num_cols > 2 else 60
+            )
 
-        pdf_table = Table(table_data, colWidths=[col_width] * num_cols, repeatRows=1)
+        pdf_table = Table(table_data, colWidths=col_widths, repeatRows=1)
         pdf_table.setStyle(
             TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ])
         )
 
@@ -302,7 +333,7 @@ if uploaded_file is not None:
         col1, col2 = st.columns(2)
         with col1:
           st.download_button(
-              label="📥 تحميل الملف النهائي (Excel مع الدمج)",
+              label="📥 تحميل الملف النهائي (Excel منسق ومدمج)",
               data=excel_data,
               file_name="Master_Corrected_Knitting_Plan.xlsx",
               mime=(
@@ -326,6 +357,6 @@ if uploaded_file is not None:
         st.dataframe(df, hide_index=True)
 
   except Exception as e:
-    st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
+    st.error(f>حدث خطأ أثناء معالجة الملف: {e}")
 else:
   st.info("الرفع متاح الآن، برجاء رفع ملف الـ Plan الفعلي للبدء.")
