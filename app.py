@@ -13,8 +13,8 @@ st.set_page_config(
 
 st.title("🧵 النظام المتكامل لإدارة وتتبع خطط التريكو (Plan & Tracking Integration)")
 st.write(
-    "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم مطابقة"
-    " وجلب كافة تفاصيل **ملف التراك (شيت OVER VIEW)** لكل ماكينة بدقة تامة."
+    "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم جلب سائر"
+    " **أعمدة وتفاصيل ملف التراك (شيت OVER VIEW)** وإضافتها كاملة لملف الإكسيل بدقة."
 )
 
 
@@ -174,7 +174,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) بكامل أعمدته وتفاصيله
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) بكامل تفاصيله
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -193,10 +193,8 @@ if plan_file is not None and track_file is not None:
         else:
           df_track.columns = [str(c).strip() for c in df_track.columns]
 
-        # البحث عن عمود رقم الماكينة في التراك
         track_mach_col = next((c for c in df_track.columns if "machine no" in c.lower() or c.lower() == "machine no."), df_track.columns[4] if len(df_track.columns) > 4 else None)
 
-        # بناء قاموس يحفظ كافة بيانات كل ماكينة مع توحيد المفاتيح (Upper & Strip) لضمان عدم ضياع أي ماكينة
         track_data_dict = {}
         for _, row in df_track.iterrows():
           m_id = str(row.get(track_mach_col, "")).strip().upper() if track_mach_col else ""
@@ -204,7 +202,6 @@ if plan_file is not None and track_file is not None:
             row_dict = {str(k).strip(): (v if pd.notna(v) else "") for k, v in row.items() if pd.notna(k)}
             track_data_dict[m_id] = row_dict
 
-        # إضافة جميع أعمدة التراك كأعمدة جديدة في نهاية جدول البلان قصاد كل ماكينة
         track_columns = []
         if track_data_dict:
           first_key = list(track_data_dict.keys())[0]
@@ -221,13 +218,13 @@ if plan_file is not None and track_file is not None:
           df_sorted[f"Track_{t_col}"] = col_values
 
         st.success(
-            f"✅ تم دمج خطة الإنتاج مع كافة تفاصيل وأعمدة ملف التراك بنجاح تام! |"
-            f" إجمالي السطور: **{len(df_sorted)}** صف"
+            f"✅ تم دمج خطة الإنتاج مع كافة تفاصيل وأعمدة ملف التراك بنجاح تام! | إجمالي"
+            f" السطور: **{len(df_sorted)}** صف"
         )
         st.write("### 📊 معاينة الجدول النهائي المدمج بكافة التفاصيل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # 📌 تصدير إلى Excel مع الدمج والتنسيق
+        # 📌 تصدير إلى Excel بكل الأعمدة والتنسيق المطلوب
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
@@ -255,9 +252,9 @@ if plan_file is not None and track_file is not None:
             col_letter = col[0].column_letter
             col_name = str(col[0].value).lower()
             if "description" in col_name or "yarn" in col_name or "track" in col_name:
-              worksheet.column_dimensions[col_letter].width = 30
+              worksheet.column_dimensions[col_letter].width = 25
             else:
-              worksheet.column_dimensions[col_letter].width = 16
+              worksheet.column_dimensions[col_letter].width = 15
 
             for cell in col:
               cell.alignment = Alignment(
@@ -292,7 +289,7 @@ if plan_file is not None and track_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # 📌 تصدير إلى PDF مع استيراد Paragraph السليم
+        # 📌 تصدير إلى PDF (باستخدام الأعمدة الأساسية لمنع انهيار التصميم مع الحفاظ على كل البيانات في الإكسيل)
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
@@ -320,21 +317,25 @@ if plan_file is not None and track_file is not None:
             alignment=1,
         )
 
+        # اختيار الأعمدة الأساسية فقط للـ PDF لتجنب الضغط الهائل
+        pdf_cols = [c for c in df_sorted.columns if not c.startswith("Track_") or c in ["Track_Work ORDER", "Track_ON / OFF", "Track_Yarn 1 LOT"]]
+        df_pdf = df_sorted[pdf_cols]
+
         table_data = []
         header_row = [
-            Paragraph(str(col), style_header) for col in df_sorted.columns
+            Paragraph(str(col), style_header) for col in df_pdf.columns
         ]
         table_data.append(header_row)
 
-        for _, row in df_sorted.iterrows():
+        for _, row in df_pdf.iterrows():
           row_cells = []
-          for col_name, val in zip(df_sorted.columns, row):
+          for col_name, val in zip(df_pdf.columns, row):
             val_str = str(val) if pd.notna(val) else ""
             val_str = val_str.replace("İ", "I")
             row_cells.append(Paragraph(val_str, style_normal))
           table_data.append(row_cells)
 
-        num_cols = len(df_sorted.columns)
+        num_cols = len(df_pdf.columns)
         col_widths = [810 / num_cols] * num_cols
 
         pdf_table = Table(table_data, colWidths=col_widths, repeatRows=1)
@@ -356,7 +357,7 @@ if plan_file is not None and track_file is not None:
         col1, col2 = st.columns(2)
         with col1:
           st.download_button(
-              label="📥 تحميل التقرير الشامل النهائي (Excel)",
+              label="📥 تحميل التقرير الشامل النهائي (Excel - كامل التفاصيل)",
               data=excel_data,
               file_name="Integrated_Full_Knitting_Plan_Tracking.xlsx",
               mime=(
@@ -366,7 +367,7 @@ if plan_file is not None and track_file is not None:
           )
         with col2:
           st.download_button(
-              label="📥 تحميل التقرير الشامل (PDF)",
+              label="📥 تحميل التقرير المرتب (PDF)",
               data=pdf_data,
               file_name="Integrated_Full_Knitting_Plan_Tracking.pdf",
               mime="application/pdf",
