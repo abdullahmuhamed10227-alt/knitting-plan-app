@@ -13,8 +13,8 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج، حذف الأعمدة الزائدة، دمج خلايا أمر"
-    " الشغل، وتفعيل التنسيق الاحترافي للإكسيل والـ PDF."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج، حذف الأعمدة الزائدة، وتفعيل"
+    " التنسيق الاحترافي (Wrap Text) للأعمدة الكبيرة في الإكسيل والـ PDF."
 )
 
 
@@ -37,7 +37,7 @@ def clean_text_single_line(val):
 
 
 uploaded_file = st.file_uploader(
-    "اختر ملف خطة الإنتاج (PDF أو Excel)", type=["pdf", "xlsx", "csv"]
+    "اختر ملف خطة الإنتاج الحقيقي (PDF أو Excel)", type=["pdf", "xlsx", "csv"]
 )
 
 if uploaded_file is not None:
@@ -188,14 +188,14 @@ if uploaded_file is not None:
         st.write("### 📊 معاينة البيانات بعد التعديل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تصدير إلى Excel مع تحديد عرض ثابت للأعمدة الكبيرة وتفعيل Wrap Text ودمج خلايا Work Order
+        # تصدير إلى Excel مع تحديد عرض ثابت للأعمدة الكبيرة وتفعيل Wrap Text
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
               writer, index=False, sheet_name="Master_Corrected_Plan"
           )
           workbook = writer.book
-          worksheet = workbook.sheets["Master_Corrected_Plan"]
+          worksheet = writer.sheets["Master_Corrected_Plan"]
 
           from openpyxl.styles import Alignment, Font, PatternFill
 
