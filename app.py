@@ -13,8 +13,8 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج هرمياً وتصحيح وتعديل اتجاهات"
-    " النصوص والأرقام المعكوسة وتنسيق ملفات الإكسيل والـ PDF بدقة."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج بحيث يصبح Work Order هو الأساس على"
+    " الشمال، مع تنسيق جداول الإكسيل والـ PDF بدقة مطابقة تماماً للمطلوب."
 )
 
 
@@ -24,7 +24,7 @@ def fix_reversed_text(val):
   s = str(val).strip()
   if s:
     s = s.replace("\n", " ").replace("\r", " ")
-    s = s.replace("İ", "I").replace("İ", "I")
+    s = s.replace("İ", "I")
     return s[::-1]
   return s
 
@@ -41,7 +41,7 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-  st.success("تم رفع الملف بنجاح! جاري معالجة البيانات وتعديل الهيكل...")
+  st.success("تم رفع الملف بنجاح! جاري معالجة وتعديل هيكل الأعمدة...")
 
   try:
     df = None
@@ -128,7 +128,7 @@ if uploaded_file is not None:
       )
 
       if wo_col:
-        # ترتيب هرمي دقيق حسب أمر الشغل ثم السيكونس ثم الماكينة
+        # ترتيب البيانات هرمياً
         sort_cols = [wo_col]
         if seq_col:
           sort_cols.append(seq_col)
@@ -137,7 +137,7 @@ if uploaded_file is not None:
 
         df_sorted = df.sort_values(by=sort_cols)
 
-        # توحيد البيانات المشتركة (Sample, Customer, Project) لكل Work Order لتعكس الشكل المطلوب بالصورة
+        # توحيد البيانات المشتركة (Sample, Customer, Project) لكل Work Order
         if sample_col:
           df_sorted[sample_col] = df_sorted.groupby(wo_col)[
               sample_col
@@ -151,11 +151,17 @@ if uploaded_file is not None:
               lambda x: x.iloc[0] if not x.empty else ""
           )
 
-        priority_cols = ["Gauge_Specs", "Machine"]
+        # 📌 ضبط الترتيب بحيث يكون Work Order في المقدمة (على أقصى الشمال)
+        priority_cols = [wo_col]
+        if "Machine" in df_sorted.columns:
+          priority_cols.append("Machine")
         if seq_col and seq_col in df_sorted.columns:
           priority_cols.append(seq_col)
-        if wo_col and wo_col not in priority_cols:
-          priority_cols.append(wo_col)
+        if (
+            "Gauge_Specs" in df_sorted.columns
+            and "Gauge_Specs" not in priority_cols
+        ):
+          priority_cols.append("Gauge_Specs")
 
         other_cols = [
             c for c in df_sorted.columns if c not in priority_cols
@@ -165,7 +171,7 @@ if uploaded_file is not None:
 
         total_rows = len(df_sorted)
         st.success(
-            f"✅ تم بنجاح استخراج وترتيب الهيكل الهرمي | إجمالي عدد السطور:"
+            f"✅ تم بنجاح استخراج وترتيب الهيكل | إجمالي عدد السطور:"
             f" **{total_rows}** صف"
         )
 
@@ -299,4 +305,4 @@ if uploaded_file is not None:
   except Exception as e:
     st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
 else:
-  st.info("الرجاء رفع ملف الـ Plan الفعلي (PDF أو Excel) للبدء.")
+  st.info("الرفع متاح الآن، برجاء رفع ملف الـ Plan الفعلي للبدء.")
