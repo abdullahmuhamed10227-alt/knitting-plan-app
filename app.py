@@ -4,7 +4,7 @@ import pdfplumber
 import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
@@ -13,8 +13,8 @@ st.set_page_config(
 
 st.title("🧵 النظام المتكامل لإدارة وتتبع خطط التريكو (Plan & Tracking Integration)")
 st.write(
-    "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم جلب سائر"
-    " **أعمدة وتفاصيل ملف التراك (شيت OVER VIEW)** وإضافتها كاملة لكل ماكينة بدقة."
+    "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم مطابقة"
+    " وجلب كافة تفاصيل **ملف التراك (شيت OVER VIEW)** لكل ماكينة بدقة تامة."
 )
 
 
@@ -174,7 +174,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) بكامل أعمدته التفصيلية
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) بكامل أعمدته وتفاصيله
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -196,12 +196,11 @@ if plan_file is not None and track_file is not None:
         # البحث عن عمود رقم الماكينة في التراك
         track_mach_col = next((c for c in df_track.columns if "machine no" in c.lower() or c.lower() == "machine no."), df_track.columns[4] if len(df_track.columns) > 4 else None)
 
-        # بناء قاموس يحفظ كافة بيانات كل ماكينة من ملف التراك
+        # بناء قاموس يحفظ كافة بيانات كل ماكينة مع توحيد المفاتيح (Upper & Strip) لضمان عدم ضياع أي ماكينة
         track_data_dict = {}
         for _, row in df_track.iterrows():
-          m_id = str(row.get(track_mach_col, "")).strip() if track_mach_col else ""
-          if m_id and m_id != "nan" and m_id.startswith("M"):
-            # تخزين الصف بالكامل كمفردات لكل ماكينة
+          m_id = str(row.get(track_mach_col, "")).strip().upper() if track_mach_col else ""
+          if m_id and m_id != "NAN" and m_id.startswith("M"):
             row_dict = {str(k).strip(): (v if pd.notna(v) else "") for k, v in row.items() if pd.notna(k)}
             track_data_dict[m_id] = row_dict
 
@@ -214,7 +213,7 @@ if plan_file is not None and track_file is not None:
         for t_col in track_columns:
           col_values = []
           for _, row in df_sorted.iterrows():
-            m_num = str(row.get("Machine", "")).strip()
+            m_num = str(row.get("Machine", "")).strip().upper()
             if m_num in track_data_dict:
               col_values.append(track_data_dict[m_num].get(t_col, ""))
             else:
@@ -222,8 +221,8 @@ if plan_file is not None and track_file is not None:
           df_sorted[f"Track_{t_col}"] = col_values
 
         st.success(
-            f"✅ تم دمج خطة الإنتاج مع كافة تفاصيل وأعمدة ملف التراك بنجاح! | إجمالي"
-            f" السطور: **{len(df_sorted)}** صف"
+            f"✅ تم دمج خطة الإنتاج مع كافة تفاصيل وأعمدة ملف التراك بنجاح تام! |"
+            f" إجمالي السطور: **{len(df_sorted)}** صف"
         )
         st.write("### 📊 معاينة الجدول النهائي المدمج بكافة التفاصيل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
@@ -293,7 +292,7 @@ if plan_file is not None and track_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # 📌 تصدير إلى PDF
+        # 📌 تصدير إلى PDF مع استيراد Paragraph السليم
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
