@@ -136,7 +136,7 @@ if plan_file is not None and track_file is not None:
           (col for col in df_plan.columns if "customer" in col.lower()), None
       )
       proj_col = next(
-          (col for col in df_plan.columns if "project" in col.lower()), None
+          (col for col in df.columns if "project" in col.lower()), None
       )
 
       if wo_col:
@@ -177,7 +177,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (Excel) واستخراج بيانات حالة الماكينات الفعلية بأمان
+        # 📌 الخطوة الثانية: قراءة ملف التراك (Excel) بأمان وبدون مشاكل في الهيدر
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -187,19 +187,19 @@ if plan_file is not None and track_file is not None:
             if "tracking" in s.lower():
               sheet_to_use = s
               break
-          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use)
+          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=None)
 
-          # تنظيف الهيدر في التراك بأمان تام
+          # البحث عن سطر الهيدر الذي يحتوي على أرقام الماكينات أو الأوردرات
+          header_row_idx = 4  # الافتراضي بناءً على الهيكل المعروف
           for idx, row in df_track.head(10).iterrows():
             row_str = " ".join([str(v) if pd.notna(v) else "" for v in row.values]).lower()
-            if (
-                "mac. no" in row_str
-                or "machine no" in row_str
-                or "running workorder" in row_str
-            ):
-              df_track.columns = [str(v).strip() for v in row.values]
-              df_track = df_track.iloc[idx + 1 :].reset_index(drop=True)
+            if "mac. no" in row_str or "machine no" in row_str or "running workorder" in row_str:
+              header_row_idx = idx
               break
+          
+          # إعادة ضبط الهيدر والداتا
+          df_track.columns = [str(v).strip() for v in df_track.iloc[header_row_idx].values]
+          df_track = df_track.iloc[header_row_idx + 1 :].reset_index(drop=True)
 
         df_track.columns = [
             str(c).strip()
@@ -238,7 +238,7 @@ if plan_file is not None and track_file is not None:
           tracking_dict = {}
           for _, row in df_track.iterrows():
             m_id = str(row.get(track_mach_col, "")).strip()
-            if m_id and m_id != "nan":
+            if m_id and m_id != "nan" and m_id != "Mac. no":
               w_val = str(row.get(track_wo_col, "")).strip() if track_wo_col else ""
               y_val = str(row.get(track_yarn_col, "")).strip() if track_yarn_col else ""
               
