@@ -4,7 +4,7 @@ import pdfplumber
 import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
@@ -13,8 +13,8 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج ودمج خلايا أامر الشغل في الإكسيل"
-    " لتعطيك الشكل الهرمي المطلوب بدقة."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج ودمج خلايا أمر الشغل في الإكسيل"
+    " وتصدير الملفات بدقة عالية."
 )
 
 
@@ -136,7 +136,6 @@ if uploaded_file is not None:
 
         df_sorted = df.sort_values(by=sort_cols)
 
-        # توحيد القيم النصية للبيانات المشتركة لتكون متطابقة تماماً لعمل الـ Merge
         shared_cols_to_merge = []
         if sample_col:
           shared_cols_to_merge.append(sample_col)
@@ -176,7 +175,7 @@ if uploaded_file is not None:
         st.write("### 📊 معاينة البيانات بعد الهيكلة:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تجهيز وإخراج شيت الإكسيل مع دمج الخلايا الرأسية (Merge) للـ Work Order والبيانات المشتركة
+        # تصدير إلى Excel مع الدمج
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
@@ -200,7 +199,6 @@ if uploaded_file is not None:
                   horizontal="center", vertical="center", wrap_text=False
               )
 
-          # ضبط العروض أوتوماتيكياً
           for col in worksheet.columns:
             max_len = 0
             col_letter = col[0].column_letter
@@ -212,7 +210,6 @@ if uploaded_file is not None:
                 max_len = max(max_len, len(str(cell.value)))
             worksheet.column_dimensions[col_letter].width = max(max_len + 5, 15)
 
-          # 📌 كود دمج الخلايا الرأسية (Merge) للـ Work Order وأي أعمدة مشتركة متطابقة لنفس الأوردر
           cols_to_merge_indices = []
           for idx, col_name in enumerate(df_sorted.columns, start=1):
             if col_name == wo_col or col_name in shared_cols_to_merge:
@@ -241,7 +238,7 @@ if uploaded_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # تجهيز زر الـ PDF
+        # تصدير إلى PDF
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
