@@ -4,7 +4,7 @@ import pdfplumber
 import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
@@ -136,7 +136,7 @@ if plan_file is not None and track_file is not None:
           (col for col in df_plan.columns if "customer" in col.lower()), None
       )
       proj_col = next(
-          (col for col in df.columns if "project" in col.lower()), None
+          (col for col in df_plan.columns if "project" in col.lower()), None
       )
 
       if wo_col:
@@ -177,7 +177,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (Excel) بأمان وبدون مشاكل في الهيدر
+        # 📌 الخطوة الثانية: قراءة ملف التراك (Excel) واستخراج بيانات الماكينات بدقة وأمان
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -189,15 +189,14 @@ if plan_file is not None and track_file is not None:
               break
           df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=None)
 
-          # البحث عن سطر الهيدر الذي يحتوي على أرقام الماكينات أو الأوردرات
-          header_row_idx = 4  # الافتراضي بناءً على الهيكل المعروف
+          # البحث عن سطر الهيدر في التراك
+          header_row_idx = 4
           for idx, row in df_track.head(10).iterrows():
             row_str = " ".join([str(v) if pd.notna(v) else "" for v in row.values]).lower()
             if "mac. no" in row_str or "machine no" in row_str or "running workorder" in row_str:
               header_row_idx = idx
               break
           
-          # إعادة ضبط الهيدر والداتا
           df_track.columns = [str(v).strip() for v in df_track.iloc[header_row_idx].values]
           df_track = df_track.iloc[header_row_idx + 1 :].reset_index(drop=True)
 
