@@ -4,8 +4,8 @@ import pdfplumber
 import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
     page_title="Knitting Plan Restructurer", page_icon="🧵", layout="wide"
@@ -13,8 +13,8 @@ st.set_page_config(
 
 st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج هرمياً وتصحيح وتعديل اتجاهات"
-    " النصوص وتنسيق ملفات الإكسيل والـ PDF بدقة."
+    "هذا التطبيق مخصص لترتيب تقارير الإنتاج ودمج خلايا أامر الشغل في الإكسيل"
+    " لتعطيك الشكل الهرمي المطلوب بدقة."
 )
 
 
@@ -41,7 +41,7 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-  st.success("تم رفع الملف بنجاح! جاري معالجة وتعديل هيكل الأعمدة...")
+  st.success("تم رفع الملف بنجاح! جاري معالجة وتعديل الهيكل ودمج الخلايا...")
 
   try:
     df = None
@@ -136,7 +136,7 @@ if uploaded_file is not None:
 
         df_sorted = df.sort_values(by=sort_cols)
 
-        # توحيد البيانات المشتركة لكل Work Order
+        # توحيد القيم النصية للبيانات المشتركة لتكون متطابقة تماماً لعمل الـ Merge
         shared_cols_to_merge = []
         if sample_col:
           shared_cols_to_merge.append(sample_col)
@@ -173,10 +173,10 @@ if uploaded_file is not None:
             f" **{total_rows}** صف"
         )
 
-        st.write("### 📊 معاينة البيانات بعد الهيكلة والضبط:")
+        st.write("### 📊 معاينة البيانات بعد الهيكلة:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تصدير إلى Excel
+        # تجهيز وإخراج شيت الإكسيل مع دمج الخلايا الرأسية (Merge) للـ Work Order والبيانات المشتركة
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
@@ -200,6 +200,7 @@ if uploaded_file is not None:
                   horizontal="center", vertical="center", wrap_text=False
               )
 
+          # ضبط العروض أوتوماتيكياً
           for col in worksheet.columns:
             max_len = 0
             col_letter = col[0].column_letter
@@ -211,9 +212,36 @@ if uploaded_file is not None:
                 max_len = max(max_len, len(str(cell.value)))
             worksheet.column_dimensions[col_letter].width = max(max_len + 5, 15)
 
+          # 📌 كود دمج الخلايا الرأسية (Merge) للـ Work Order وأي أعمدة مشتركة متطابقة لنفس الأوردر
+          cols_to_merge_indices = []
+          for idx, col_name in enumerate(df_sorted.columns, start=1):
+            if col_name == wo_col or col_name in shared_cols_to_merge:
+              cols_to_merge_indices.append(idx)
+
+          if cols_to_merge_indices:
+            start_row = 2
+            while start_row <= worksheet.max_row:
+              wo_val = worksheet.cell(row=start_row, column=1).value
+              end_row = start_row
+              while end_row + 1 <= worksheet.max_row:
+                if worksheet.cell(row=end_row + 1, column=1).value == wo_val:
+                  end_row += 1
+                else:
+                  break
+
+              if end_row > start_row:
+                for col_idx in cols_to_merge_indices:
+                  worksheet.merge_cells(
+                      start_row=start_row,
+                      start_column=col_idx,
+                      end_row=end_row,
+                      end_column=col_idx,
+                  )
+              start_row = end_row + 1
+
         excel_data = excel_output.getvalue()
 
-        # تصدير إلى PDF
+        # تجهيز زر الـ PDF
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
@@ -277,7 +305,7 @@ if uploaded_file is not None:
         col1, col2 = st.columns(2)
         with col1:
           st.download_button(
-              label="📥 تحميل الملف النهائي (Excel)",
+              label="📥 تحميل الملف النهائي (Excel مع الدمج)",
               data=excel_data,
               file_name="Master_Corrected_Knitting_Plan.xlsx",
               mime=(
