@@ -4,7 +4,7 @@ import pdfplumber
 import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
@@ -177,67 +177,53 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (Excel) واستخراج بيانات الماكينات بدقة وأمان
+        # 📌 الخطوة الثانية: قراءة ملف التراك (Excel) بأمان وبدون مشاكل في الهيدر
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
           xls = pd.ExcelFile(track_file)
           sheet_to_use = xls.sheet_names[0]
           for s in xls.sheet_names:
-            if "tracking" in s.lower():
+            if "tracking" in s.lower() or "over" in s.lower():
               sheet_to_use = s
               break
-          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=None)
+          # قراءة الشيت بدون فرض هيدر خارجي لتفادي أي تضارب في الأعمدة
+          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use)
 
-          # البحث عن سطر الهيدر في التراك
-          header_row_idx = 4
+        # البحث أوتوماتيك عن عمود رقم الماكينة والأوردر والغزل بالمرور على كل السطور والـ Columns
+        track_mach_col, track_wo_col, track_yarn_col = None, None, None
+
+        for col in df_track.columns:
+          col_str = str(col).lower()
+          if "machine" in col_str or "mac" in col_str or "m.c" in col_str:
+            track_mach_col = col
+          elif "workorder" in col_str or "work order" in col_str or "running" in col_str:
+            track_wo_col = col
+          elif "yarn" in col_str or "mix" in col_str:
+            track_yarn_col = col
+
+        # لو ملقاش الأعمدة في الهيدر، يبحث جوه أول 10 صفوف
+        if not track_mach_col or not track_wo_col:
           for idx, row in df_track.head(10).iterrows():
-            row_str = " ".join([str(v) if pd.notna(v) else "" for v in row.values]).lower()
-            if "mac. no" in row_str or "machine no" in row_str or "running workorder" in row_str:
-              header_row_idx = idx
-              break
-          
-          df_track.columns = [str(v).strip() for v in df_track.iloc[header_row_idx].values]
-          df_track = df_track.iloc[header_row_idx + 1 :].reset_index(drop=True)
+            for col in df_track.columns:
+              val_low = str(row[col]).lower()
+              if "m1" in val_low or "m10" in val_low or "machine" in val_low:
+                track_mach_col = col
+              if "43" in val_low or "47" in val_low or "work" in val_low:
+                track_wo_col = col
 
-        df_track.columns = [
-            str(c).strip()
-            for c in df_track.columns
-            if pd.notna(c) and str(c).strip() != "nan"
-        ]
+        # لو لسه مش مصنفين، نأخذ أول عمود للماكينة وثاني أو ثالث للأوردر افتراضياً
+        if not track_mach_col and len(df_track.columns) > 4:
+          track_mach_col = df_track.columns[4]  # عادة عمود Machine NO في شيتات التراك
+        if not track_wo_col and len(df_track.columns) > 2:
+          track_wo_col = df_track.columns[2]
 
-        track_mach_col = next(
-            (
-                c
-                for c in df_track.columns
-                if "mac" in c.lower() or "machine" in c.lower()
-            ),
-            None,
-        )
-        track_wo_col = next(
-            (
-                c
-                for c in df_track.columns
-                if "workorder" in c.lower()
-                or "work order" in c.lower()
-                or "running" in c.lower()
-            ),
-            None,
-        )
-        track_yarn_col = next(
-            (
-                c
-                for c in df_track.columns
-                if "yarn" in c.lower() or "mix" in c.lower()
-            ),
-            None,
-        )
-
-        if track_mach_col:
-          tracking_dict = {}
-          for _, row in df_track.iterrows():
-            m_id = str(row.get(track_mach_col, "")).strip()
-            if m_id and m_id != "nan" and m_id != "Mac. no":
+        # استخراج قاموس التتبع لكل ماكينة
+        tracking_dict = {}
+        for _, row in df_track.iterrows():
+          try:
+            m_id = str(row.get(track_mach_col, "")).strip() if track_mach_col else ""
+            if m_id and m_id != "nan" and m_id != "Mac. no" and m_id.startswith("M"):
               w_val = str(row.get(track_wo_col, "")).strip() if track_wo_col else ""
               y_val = str(row.get(track_yarn_col, "")).strip() if track_yarn_col else ""
               
@@ -252,25 +238,27 @@ if plan_file is not None and track_file is not None:
                   "Live_Order": w_val if w_val and w_val != "nan" else "لا يوجد أوردر",
                   "Live_Yarn": y_val if y_val and y_val != "nan" else "-"
               }
+          except:
+            continue
 
-          live_statuses = []
-          live_orders = []
-          live_yarns = []
+        live_statuses = []
+        live_orders = []
+        live_yarns = []
 
-          for _, row in df_sorted.iterrows():
-            m_num = str(row.get("Machine", "")).strip()
-            if m_num in tracking_dict:
-              live_statuses.append(tracking_dict[m_num]["Live_Status"])
-              live_orders.append(tracking_dict[m_num]["Live_Order"])
-              live_yarns.append(tracking_dict[m_num]["Live_Yarn"])
-            else:
-              live_statuses.append("غير متوفر بالتراك")
-              live_orders.append("-")
-              live_yarns.append("-")
+        for _, row in df_sorted.iterrows():
+          m_num = str(row.get("Machine", "")).strip()
+          if m_num in tracking_dict:
+            live_statuses.append(tracking_dict[m_num]["Live_Status"])
+            live_orders.append(tracking_dict[m_num]["Live_Order"])
+            live_yarns.append(tracking_dict[m_num]["Live_Yarn"])
+          else:
+            live_statuses.append("غير متوفر بالتراك")
+            live_orders.append("-")
+            live_yarns.append("-")
 
-          df_sorted["Actual_Machine_Status"] = live_statuses
-          df_sorted["Actual_Running_Order"] = live_orders
-          df_sorted["Actual_Yarn_Details"] = live_yarns
+        df_sorted["Actual_Machine_Status"] = live_statuses
+        df_sorted["Actual_Running_Order"] = live_orders
+        df_sorted["Actual_Yarn_Details"] = live_yarns
 
         st.success(
             f"✅ تم دمج ومعالجة خطة الإنتاج مع ملف تتبع الماكينات بنجاح! | إجمالي"
