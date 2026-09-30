@@ -102,7 +102,7 @@ if uploaded_file is not None:
     if df is not None and not df.empty:
       df.columns = [str(col).strip() for col in df.columns]
 
-      # 📌 حذف الأعمدة غير المطلوبة (Start, Finish, Acs) إن وجدت
+      # حذف الأعمدة غير المطلوبة (Start, Finish, Acs) إن وجدت
       cols_to_drop = []
       for col in df.columns:
         col_lower = col.lower()
@@ -188,7 +188,7 @@ if uploaded_file is not None:
         st.write("### 📊 معاينة البيانات بعد التعديل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # 📌 تصدير إلى Excel مع تحديد عرض ثابت للأعمدة الكبيرة وتفعيل Wrap Text
+        # تصدير إلى Excel مع تحديد عرض ثابت للأعمدة الكبيرة وتفعيل Wrap Text
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
@@ -212,11 +212,9 @@ if uploaded_file is not None:
                   horizontal="center", vertical="center", wrap_text=True
               )
 
-          # ضبط أعراض الأعمدة وتفعيل الـ Wrap Text للأعمدة التي تحتوى على نصوص طويلة
           for col in worksheet.columns:
             col_letter = col[0].column_letter
             col_name = str(col[0].value).lower()
-            # إعطاء مساحة أوسع ومميزة لأعمدة الوصف والخيوط
             if "description" in col_name or "yarn" in col_name:
               worksheet.column_dimensions[col_letter].width = 45
             elif "note" in col_name:
@@ -229,7 +227,6 @@ if uploaded_file is not None:
                   vertical="center", horizontal="center", wrap_text=True
               )
 
-          # دمج خلايا Work Order والبيانات المشتركة رأسياً
           cols_to_merge_indices = []
           for idx, col_name in enumerate(df_sorted.columns, start=1):
             if col_name == wo_col or col_name in shared_cols_to_merge:
@@ -258,7 +255,7 @@ if uploaded_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # 📌 تصدير إلى PDF بتنسيق منضبط ومهذب
+        # تصدير إلى PDF بتنسيق منضبط
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
@@ -301,7 +298,6 @@ if uploaded_file is not None:
           table_data.append(row_cells)
 
         num_cols = len(df_sorted.columns)
-        # توزيع عريض ومخصص للأعمدة في الـ PDF لتفادي التداخل
         col_widths = []
         for col_name in df_sorted.columns:
           c_low = str(col_name).lower()
@@ -357,6 +353,6 @@ if uploaded_file is not None:
         st.dataframe(df, hide_index=True)
 
   except Exception as e:
-    st.error(f>حدث خطأ أثناء معالجة الملف: {e}")
+    st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
 else:
   st.info("الرفع متاح الآن، برجاء رفع ملف الـ Plan الفعلي للبدء.")
