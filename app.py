@@ -4,7 +4,7 @@ import pdfplumber
 import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
@@ -142,7 +142,8 @@ if plan_file is not None and track_file is not None:
       if wo_col:
         sort_cols = [wo_col]
         if seq_col:
-          sort_cols.append(seq_col)
+          sort_cols.append(sort_cols) and sort_cols.append(seq_col) # Simplified
+          sort_cols = [wo_col, seq_col] if seq_col else [wo_col]
         if "Machine" in df_plan.columns:
           sort_cols.append("Machine")
 
@@ -177,7 +178,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW بالتحديد)
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) بدون المساس بالهيكل
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -188,38 +189,47 @@ if plan_file is not None and track_file is not None:
               sheet_to_use = s
               break
           
-          # قراءة الشيت مع جعل الصف الأول هو الهيدر المباشر
-          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use)
-          if df_track.iloc[0].astype(str).str.contains("Machine NO|Work ORDER").any():
-            df_track.columns = df_track.iloc[0].values
-            df_track = df_track.iloc[1:].reset_index(drop=True)
+          # قراءة البيانات مع اعتبار الصف رقم 0 هو الهيدر الفعلي
+          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=0)
 
-        df_track.columns = [str(c).strip() for c in df_track.columns if pd.notna(c)]
-
-        # تحديد أعمدة التراك بدقة بناءً على شيت OVER VIEW
-        # Machine NO., Work ORDER, Yarn 1 LOT, Yarn 1 NE, ON / OFF
-        mach_key = next((c for c in df_track.columns if "machine" in c.lower() or "no" in c.lower()), None)
-        wo_key = next((c for c in df_track.columns if "work" in c.lower() and "order" in c.lower()), None)
-        yarn1_lot = next((c for c in df_track.columns if "yarn 1 lot" in c.lower()), None)
-        yarn1_ne = next((c for c in df_track.columns if "yarn 1 ne" in c.lower()), None)
-        status_key = next((c for c in df_track.columns if "on" in c.lower() and "off" in c.lower()), None)
-
+        # استخراج قاموس التتبع للماكينات بأمان تام من أعمدة شيت OVER VIEW
         tracking_dict = {}
         for _, row in df_track.iterrows():
           try:
-            m_id = str(row.get(mach_key, "")).strip() if mach_key else ""
-            if m_id and m_id != "nan" and m_id.startswith("M"):
-              w_val = str(row.get(wo_key, "")).strip() if wo_key and pd.notna(row.get(wo_key)) else ""
-              y_lot = str(row.get(yarn1_lot, "")).strip() if yarn1_lot and pd.notna(row.get(yarn1_lot)) else ""
-              y_ne = str(row.get(yarn1_ne, "")).strip() if yarn1_ne and pd.notna(row.get(yarn1_ne)) else ""
-              on_off = str(row.get(status_key, "")).strip() if status_key and pd.notna(row.get(status_key)) else "ON"
+            # البحث عن رقم الماكينة (عادة في العمود 4 أو العمود الذي يحتوي على M...)
+            m_id = ""
+            w_val = ""
+            y_lot = ""
+            y_ne = ""
+            on_off = "ON"
 
-              status_str = "شغالة (Running)" if on_off.upper() == "ON" else "واقفة (Stopped)"
-              yarn_details = f"{y_lot} ({y_ne})" if y_lot and y_ne else (y_lot or y_ne or "-")
+            for val in row.values:
+              val_str = str(val).strip()
+              if val_str.startswith("M") and len(val_str) <= 6:
+                m_id = val_str
+                break
+            
+            if m_id:
+              # محاولة استخراج الأوردر والغزل وحالة ON/OFF من نفس الصف
+              row_vals = [str(v) for v in row.values if pd.notna(v)]
+              
+              for v in row_vals:
+                if "-" in v and len(v) >= 7 and ("/" in v or v[:2].isdigit()):
+                  w_val = v
+                if v.upper() in ["ON", "OFF"]:
+                  on_off = v.upper()
+
+              # أخذ أول يارن (Yarn 1) لو موجود
+              if len(row_vals) > 6:
+                y_lot = row_vals[6] if len(row_vals) > 6 else ""
+                y_ne = row_vals[7] if len(row_vals) > 7 else ""
+
+              status_str = "شغالة (Running)" if on_off == "ON" else "واقفة (Stopped)"
+              yarn_details = f"{y_lot} ({y_ne})" if y_lot and y_ne else (y_lot or "-")
 
               tracking_dict[m_id] = {
                   "Live_Status": status_str,
-                  "Live_Order": w_val if w_val and w_val != "nan" else "لا يوجد أوردر",
+                  "Live_Order": w_val if w_val else "لا يوجد أوردر",
                   "Live_Yarn": yarn_details
               }
           except:
@@ -245,8 +255,8 @@ if plan_file is not None and track_file is not None:
         df_sorted["Actual_Yarn_Details"] = live_yarns
 
         st.success(
-            f"✅ تم مطابقة خطة الإنتاج مع ملف التتبع (شيت OVER VIEW) بنجاح! |"
-            f" إجمالي السطور: **{len(df_sorted)}** صف"
+            f"✅ تم دمج ومعالجة خطة الإنتاج مع ملف تتبع الماكينات بنجاح! | إجمالي"
+            f" السطور: **{len(df_sorted)}** صف"
         )
         st.write("### 📊 معاينة الجدول النهائي المدمج:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
