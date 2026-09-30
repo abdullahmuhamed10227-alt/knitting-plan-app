@@ -14,7 +14,7 @@ st.set_page_config(
 st.title("🧵 النظام المتكامل لإدارة وتتبع خطط التريكو (Plan & Tracking Integration)")
 st.write(
     "هذا النظام يقوم برفع **ملف البلان (PDF)** ومعالجته وترتيبه هرمياً، ثم مطابقة"
-    " وجلب كافة تفاصيل **ملف التراك (شيت OVER VIEW)** لكل ماكينة بدقة تامة وبدون أي نقص."
+    " وجلب كافة تفاصيل **ملف التراك (شيت OVER VIEW بعد توريث الأوردرات)** لكل ماكينة بدقة تامة وبدون أي نقص."
 )
 
 
@@ -44,7 +44,7 @@ with col_up2:
   track_file = st.file_uploader("2️⃣ اختر ملف تتبع الماكينات الفعلي (Excel)", type=["xlsx", "xls", "csv"])
 
 if plan_file is not None and track_file is not None:
-  st.success("✅ تم رفع الملفين بنجاح! جاري الدمج والمطابقة الدقيقة لكافة الماكينات...")
+  st.success("✅ تم رفع الملفين بنجاح! جاري الدمج والمطابقة الشاملة لكافة الأعمدة...")
 
   try:
     # 📌 الخطوة الأولى: معالجة واستخراج جدول البلان (PDF)
@@ -174,7 +174,7 @@ if plan_file is not None and track_file is not None:
         ]
         df_sorted = df_sorted[priority_cols + other_cols]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) وتنظيف أرقام الماكينات بدقة
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) مع توريث الأوردرات (ffill)
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -193,13 +193,15 @@ if plan_file is not None and track_file is not None:
         else:
           df_track.columns = [str(c).strip() for c in df_track.columns]
 
+        # توريث القيم المدمجة رأسياً في الإكسيل (مثل Work ORDER) لضمان عدم وجود خلايا فارغة
+        df_track = df_track.ffill()
+
         track_mach_col = next((c for c in df_track.columns if "machine no" in c.lower() or c.lower() == "machine no."), df_track.columns[4] if len(df_track.columns) > 4 else None)
 
         track_data_dict = {}
         for _, row in df_track.iterrows():
           raw_m_id = str(row.get(track_mach_col, "")).strip()
           if raw_m_id and raw_m_id != "nan":
-            # توحيد صيغة رقم الماكينة (إزالة المسافات وتحويلها لكابتل لضمان التطابق التام)
             m_id_clean = "".join(raw_m_id.split()).upper()
             row_dict = {str(k).strip(): (v if pd.notna(v) else "") for k, v in row.items() if pd.notna(k)}
             track_data_dict[m_id_clean] = row_dict
@@ -223,8 +225,7 @@ if plan_file is not None and track_file is not None:
           df_sorted[f"Track_{t_col}"] = col_values
 
         st.success(
-            f"✅ تم دمج خطة الإنتاج مع كافة تفاصيل وأعمدة ملف التراك بنجاح تام! | إجمالي"
-            f" السطور: **{len(df_sorted)}** صف"
+            f"✅ تم دمج خطة الإنتاج مع كافة تفاصيل وأعمدة ملف التراك (بعد توريث الأوردرات) بنجاح تـام! | إجمالي السطور: **{len(df_sorted)}** صف"
         )
         st.write("### 📊 معاينة الجدول النهائي المدمج بكافة التفاصيل:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
@@ -294,7 +295,7 @@ if plan_file is not None and track_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # 📌 تصدير إلى PDF (للأعمدة الأساسية لمنع الضغط)
+        # 📌 تصدير إلى PDF (الأعمدة الأساسية لمنع الضغط)
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
