@@ -15,8 +15,8 @@ st.title("🧵 النظام المدمج لخطة التريكو مع بيانا
 st.write(
     "هذا النظام يحافظ على ملف البلان الأصلي سليماً تماماً بنسبة 100%، ويقوم بسحب"
     " أعمدة التراك الـ 6 (Work Order, Type Qualities, Sample, Stitch Length,"
-    " Remaining, On/Off) بدقة متناهية من ملف التراك الحقيقي وإضافتها في أقصى"
-    " اليمين بناءً على رقم الماكينة."
+    " Remaining, On/Off) بدقة متناهية وإضافتها في أقصى اليمين بناءً على رقم"
+    " الماكينة."
 )
 
 
@@ -53,37 +53,44 @@ if plan_file is not None and track_file is not None:
   st.success("✅ تم رفع الملفين بنجاح! جاري معالجة البلان وسحب بيانات التراك الحقيقية...")
 
   try:
-    # 📌 الخطوة الأولى: معالجة البلان الأصلي تماماً كما اتفقنا وبدون أي مساس
+    # 📌 الخطوة الأولى: استخراج جدول البلان من ملف الـ PDF بمرونة تامة لعدد الأعمدة
     all_rows = []
     headers = None
 
     with pdfplumber.open(plan_file) as pdf:
       for page in pdf.pages:
         table = page.extract_table()
-        if table:
+        if table and len(table) > 0:
           if headers is None:
-            headers = table[0]
+            headers = [str(h).strip() if h else f"Col_{i}" for i, h in enumerate(table[0])]
             rows = table[1:]
           else:
             rows = [
                 row
                 for row in table[1:]
-                if row != headers
+                if row != table[0]
                 and not any("Work Order" in str(cell) for cell in row)
             ]
-          all_rows.extend(rows)
+          for r in rows:
+            # توحيد طول الصفوف ديناميكياً لتجنب أي خطأ في عدد الأعمدة
+            if len(r) < len(headers):
+              r = list(r) + [""] * (len(headers) - len(r))
+            elif len(r) > len(headers):
+              r = r[:len(headers)]
+            all_rows.append(r)
 
     if all_rows and headers:
+      # معالجة تكرار أسماء الأعمدة إن وجدت
       clean_headers = []
       seen = {}
       for h in headers:
-        h_str = str(h).strip() if h else ""
+        h_str = str(h).strip() if h else "Col"
         if h_str in seen:
           seen[h_str] += 1
           clean_headers.append(f"{h_str}_{seen[h_str]}")
         else:
           seen[h_str] = 0
-          clean_headers.append(h_str if h_str else f"Col_{seen[h_str]}")
+          clean_headers.append(h_str)
 
       df = pd.DataFrame(all_rows, columns=clean_headers)
 
@@ -180,7 +187,7 @@ if plan_file is not None and track_file is not None:
         final_columns_order = priority_cols + other_cols
         df_sorted = df_sorted[final_columns_order]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك الفعلي (شيت OVER VIEW) من ملف الإكسيل المرفوع
+        # 📌 الخطوة الثانية: قراءة ملف التراك الفعلي (شيت OVER VIEW)
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -203,18 +210,16 @@ if plan_file is not None and track_file is not None:
         df_track_data = df_track.iloc[2:].copy()
         df_track_data.columns = track_headers
 
-        # توريث أوردرات التشغيل وأنواع الجودة رأسياً (ffill) لأنها مدمجة رأسياً في شيت التراك
+        # توريث أوردرات التشغيل وأنواع الجودة رأسياً (ffill)
         df_track_data.iloc[:, 2] = df_track_data.iloc[:, 2].ffill()  # Work ORDER
         df_track_data.iloc[:, 0] = df_track_data.iloc[:, 0].ffill()  # type Qualities
 
-        # بناء قاموس البحث للماكينات بدقة تامة من الملف الحقيقي
+        # بناء قاموس البحث للماكينات من الملف الحقيقي
         track_lookup = {}
         for _, row in df_track_data.iterrows():
           row_vals = list(row.values)
-          
-          # عمود رقم الماكينة هو العمود رقم 4 (Machine NO.)
           m_id_raw = str(row_vals[4]).strip() if len(row_vals) > 4 else ""
-          if m_id_raw and m_id_raw != "nan" and m_id_raw != "nan":
+          if m_id_raw and m_id_raw != "nan":
             m_clean = "".join(m_id_raw.split()).upper()
 
             t_qual = str(row_vals[0]).strip() if len(row_vals) > 0 and pd.notna(row_vals[0]) else ""
@@ -280,7 +285,7 @@ if plan_file is not None and track_file is not None:
 
         total_rows = len(df_sorted)
         st.success(
-            f"✅ تم دمج البلان وسحب بيانات التراك الحقيقية (بقيمه الأصلية الكاملة بدون نقصان) بنجاح تام! | إجمالي السطور: **{total_rows}** صف"
+            f"✅ تم دمج البلان وسحب بيانات التراك الحقيقية (بقيمه الأصلية الكاملة) بنجاح تام! | إجمالي السطور: **{total_rows}** صف"
         )
 
         st.write("### 📊 معاينة الجدول النهائي المدمج:")
