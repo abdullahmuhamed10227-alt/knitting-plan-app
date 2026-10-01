@@ -8,14 +8,14 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
-    page_title="Knitting Plan & Tracking Integration", page_icon="🧵", layout="wide"
+    page_title="Knitting Plan & Tracking System", page_icon="🧵", layout="wide"
 )
 
-st.title("🧵 النظام المدمج لخطة التريكو مع بيانات التراك المخصصة")
+st.title("🧵 النظام المدمج لخطة التريكو مع بيانات التراك الأصلية الخام")
 st.write(
     "هذا النظام يحافظ على ملف البلان الأصلي سليماً تماماً بنسبة 100%، ويقوم بسحب"
-    " الأعمدة الـ 6 المطلوبة فقط من ملف التراك (Work Order, Type Qualities,"
-    " Sample, Stitch Length, Remaining, On/Off) وإضافتها كأعمدة جديدة في أقصى"
+    " أعمدة التراك الـ 6 (Work Order, Type Qualities, Sample, Stitch Length,"
+    " Remaining, On/Off) بنصوصها الأصلية الخام دون أي تعديل، وإضافتها في أقصى"
     " اليمين بناءً على رقم الماكينة."
 )
 
@@ -50,10 +50,10 @@ with col_up2:
   )
 
 if plan_file is not None and track_file is not None:
-  st.success("✅ تم رفع الملفين بنجاح! جاري المعالجة والدمج الآمن...")
+  st.success("✅ تم رفع الملفين بنجاح! جاري معالجة وسحب البيانات الخام...")
 
   try:
-    # 📌 الخطوة الأولى: معالجة البلان الأصلي تماماً كما اتفقنا
+    # 📌 الخطوة الأولى: معالجة البلان الأصلي تماماً كما اتفقنا وبدون أي مساس
     all_rows = []
     headers = None
 
@@ -180,7 +180,7 @@ if plan_file is not None and track_file is not None:
         final_columns_order = priority_cols + other_cols
         df_sorted = df_sorted[final_columns_order]
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) واستخراج الأعمدة الـ 6 المحددة
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) وسحب القيمة الخام بدقة تامة
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -202,14 +202,14 @@ if plan_file is not None and track_file is not None:
         df_track_data = df_track.iloc[1:].copy()
         df_track_data.columns = track_headers
 
-        # توريث أوردرات التشغيل رأسياً (ffill) لضمان دقة القراءة في التراك
+        # توريث أوردرات التشغيل رأسياً (ffill) لأنها تكون مدمجة في شيت التراك
         if "Work ORDER" in df_track_data.columns:
           if isinstance(df_track_data["Work ORDER"], pd.DataFrame):
             df_track_data.iloc[:, 2] = df_track_data.iloc[:, 2].ffill()
           else:
             df_track_data["Work ORDER"] = df_track_data["Work ORDER"].ffill()
 
-        # بناء قاموس البحث للماكينات من التراك
+        # بناء قاموس البحث للماكينات مع التقاط القيم الفعلية الخام (Type Qualities, Stitch Length, Sample No, etc.)
         track_lookup = {}
         for _, row in df_track_data.iterrows():
           m_id_raw = ""
@@ -225,35 +225,35 @@ if plan_file is not None and track_file is not None:
             m_clean = "".join(m_id_raw.split()).upper()
             row_vals = list(row.values)
 
-            # المواقع الحقيقية للأعمدة المطلوبة في شيت OVER VIEW:
-            # type Qualities (col 0), Work ORDER (col 2), Stitch Length (col 12), sample no. (eco) (col 13), Remaining (col 19), on / off (col 24)
+            # المواقع الدقيقة للأعمدة الخام في شيت OVER VIEW الأصلي:
+            # 0: type Qualities, 2: Work ORDER, 12: Stitch Length, 13: sample no. (eco), 19: Remaining, 24: on / off
             t_qual = (
-                str(row_vals[0])
+                str(row_vals[0]).strip()
                 if len(row_vals) > 0 and pd.notna(row_vals[0])
                 else ""
             )
             t_wo = (
-                str(row_vals[2])
+                str(row_vals[2]).strip()
                 if len(row_vals) > 2 and pd.notna(row_vals[2])
                 else ""
             )
             t_stitch = (
-                str(row_vals[12])
+                str(row_vals[12]).strip()
                 if len(row_vals) > 12 and pd.notna(row_vals[12])
                 else ""
             )
             t_sample = (
-                str(row_vals[13])
+                str(row_vals[13]).strip()
                 if len(row_vals) > 13 and pd.notna(row_vals[13])
                 else ""
             )
             t_rem = (
-                str(row_vals[19])
+                str(row_vals[19]).strip()
                 if len(row_vals) > 19 and pd.notna(row_vals[19])
                 else ""
             )
             t_onoff = (
-                str(row_vals[24])
+                str(row_vals[24]).strip()
                 if len(row_vals) > 24 and pd.notna(row_vals[24])
                 else "ON"
             )
@@ -265,11 +265,11 @@ if plan_file is not None and track_file is not None:
                 "Track_Stitch_Length": t_stitch if t_stitch != "nan" else "",
                 "Track_Remaining": t_rem if t_rem != "nan" else "",
                 "Track_OnOff": (
-                    "ON" if t_onoff.strip().upper() == "ON" else "OFF"
+                    "ON" if t_onoff.upper() == "ON" else "OFF"
                 ),
             }
 
-        # 📌 الخطوة الثالثة: جلب البيانات للأعمدة الـ 6 وإضافتها في أقصى اليمين
+        # 📌 الخطوة الثالثة: سحب البيانات الخام لكل ماكينة وإضافتها في أقصى اليمين
         (
             col_t_wo,
             col_t_qual,
@@ -280,7 +280,6 @@ if plan_file is not None and track_file is not None:
         ) = ([], [], [], [], [], [])
 
         for _, row in df_sorted.iterrows():
-          # البحث عن رقم الماكينة في صف البلان (العمود الثاني عادةً أو ما يسمى Machine)
           raw_m = ""
           for col_name in df_sorted.columns:
             if "machine" in col_name.lower() or "mc" in col_name.lower():
@@ -293,21 +292,31 @@ if plan_file is not None and track_file is not None:
 
           if m_clean in track_lookup:
             d = track_lookup[m_clean]
-            col_t_wo.append(d["Track_Work_Order"])
-            col_t_qual.append(d["Track_Type_Qualities"])
-            col_t_sample.append(d["Track_Sample_Eco"])
-            col_t_stitch.append(d["Track_Stitch_Length"])
-            col_t_rem.append(d["Track_Remaining"])
+            col_t_wo.append(
+                d["Track_Work_Order"] if d["Track_Work_Order"] else ""
+            )
+            col_t_qual.append(
+                d["Track_Type_Qualities"] if d["Track_Type_Qualities"] else ""
+            )
+            col_t_sample.append(
+                d["Track_Sample_Eco"] if d["Track_Sample_Eco"] else ""
+            )
+            col_t_stitch.append(
+                d["Track_Stitch_Length"] if d["Track_Stitch_Length"] else ""
+            )
+            col_t_rem.append(
+                d["Track_Remaining"] if d["Track_Remaining"] else ""
+            )
             col_t_onoff.append(d["Track_OnOff"])
           else:
-            col_t_wo.append("-")
-            col_t_qual.append("-")
-            col_t_sample.append("-")
-            col_t_stitch.append("-")
-            col_t_rem.append("-")
+            col_t_wo.append("")
+            col_t_qual.append("")
+            col_t_sample.append("")
+            col_t_stitch.append("")
+            col_t_rem.append("")
             col_t_onoff.append("OFF")
 
-        # إضافة الأعمدة الجديدة في نهاية الجدول تماماً (ناحية اليمين)
+        # إضافة الأعمدة في أقصى اليمين بنصوصها الأصلية
         df_sorted["Track Work Order"] = col_t_wo
         df_sorted["Track Type Qualities"] = col_t_qual
         df_sorted["Track Sample No."] = col_t_sample
@@ -317,8 +326,8 @@ if plan_file is not None and track_file is not None:
 
         total_rows = len(df_sorted)
         st.success(
-            f"✅ تم الحفاظ على البلان الأصلي كاملاً وإضافة الأعمدة الـ 6 للتراك في"
-            f" اليمين بنجاح! | إجمالي السطور: **{total_rows}** صف"
+            f"✅ تم دمج البلان وسحب بيانات التراك الخام (بقيمه الأصلية الكاملة) بنجاح"
+            f" تام! | إجمالي السطور: **{total_rows}** صف"
         )
 
         st.write("### 📊 معاينة الجدول النهائي المدمج:")
@@ -351,8 +360,8 @@ if plan_file is not None and track_file is not None:
           for col in worksheet.columns:
             col_letter = col[0].column_letter
             col_name = str(col[0].value).lower()
-            if "description" in col_name or "yarn" in col_name:
-              worksheet.column_dimensions[col_letter].width = 40
+            if "description" in col_name or "yarn" in col_name or "qualities" in col_name:
+              worksheet.column_dimensions[col_letter].width = 35
             else:
               worksheet.column_dimensions[col_letter].width = 16
 
@@ -389,7 +398,7 @@ if plan_file is not None and track_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # 📌 تصدير إلى PDF مرتب ومنضبط
+        # 📌 تصدير إلى PDF مرتب
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
@@ -455,7 +464,7 @@ if plan_file is not None and track_file is not None:
           st.download_button(
               label="📥 تحميل الملف النهائي المدمج (Excel)",
               data=excel_data,
-              file_name="Plan_With_Custom_Tracking_Cols.xlsx",
+              file_name="Plan_With_Raw_Tracking_Data.xlsx",
               mime=(
                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               ),
@@ -465,7 +474,7 @@ if plan_file is not None and track_file is not None:
           st.download_button(
               label="📥 تحميل التقرير (PDF)",
               data=pdf_data,
-              file_name="Plan_With_Custom_Tracking_Cols.pdf",
+              file_name="Plan_With_Raw_Tracking_Data.pdf",
               mime="application/pdf",
               use_container_width=True,
           )
