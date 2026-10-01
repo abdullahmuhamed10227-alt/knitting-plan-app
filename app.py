@@ -8,19 +8,20 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
-    page_title="Knitting Plan Restructurer", page_icon="🧵", layout="wide"
+    page_title="Smart Knitting Plan & Tracking System", page_icon="🧵", layout="wide"
 )
 
-st.title("🧵 نظام إدارة وإعادة هيكلة خطة التريكو (Knitting Plan)")
+st.title("🧵 النظام الذكي المدمج لخطط التريكو وتتبع الماكينات (Plan & Tracking)")
 st.write(
-    "هذا التطبيق مخصص لترتيب تقارير الإنتاج، حذف الأعمدة الزائدة، وتفعيل"
-    " التنسيق الاحترافي (Wrap Text) للأعمدة الكبيرة في الإكسيل والـ PDF."
+    "قم برفع **ملف خطة الإنتاج (PDF)** وملف **تتبع الماكينات (Excel)** معاً ليقوم"
+    " النظام بمعالجة البلان من A إلى L، وسحب حالة الماكينات والأوردرات الفعلية"
+    " والمتبقي والإيكو وطول الغرزة في الأعمدة من M إلى R بدقة متناهية."
 )
 
 
 def fix_reversed_text(val):
   if pd.isna(val):
-    return val
+    return ""
   s = str(val).strip()
   if s:
     s = s.replace("\n", " ").replace("\r", " ")
@@ -31,80 +32,76 @@ def fix_reversed_text(val):
 
 def clean_text_single_line(val):
   if pd.isna(val):
-    return val
+    return ""
   s = str(val).strip()
   return s.replace("\n", " ").replace("\r", " ")
 
 
-uploaded_file = st.file_uploader(
-    "اختر ملف خطة الإنتاج الحقيقي (PDF أو Excel)", type=["pdf", "xlsx", "csv"]
-)
+# 📌 واجهة رفع الملفين معاً في نفس الشاشة
+col_up1, col_up2 = st.columns(2)
+with col_up1:
+  plan_file = st.file_uploader("1️⃣ اختر ملف خطة الإنتاج الأساسي (PDF)", type=["pdf"])
+with col_up2:
+  track_file = st.file_uploader("2️⃣ اختر ملف تتبع الماكينات الفعلي (Excel)", type=["xlsx", "xls", "csv"])
 
-if uploaded_file is not None:
-  st.success("تم رفع الملف بنجاح! جاري تنقية الأعمدة وتنسيق الجداول...")
+if plan_file is not None and track_file is not None:
+  st.success("✅ تم رفع الملفين بنجاح! جاري المعالجة والدمج والمطابقة الذكية...")
 
   try:
-    df = None
-    if uploaded_file.name.endswith(".xlsx"):
-      df = pd.read_excel(uploaded_file)
-    elif uploaded_file.name.endswith(".csv"):
-      df = pd.read_csv(uploaded_file)
+    # 📌 الخطوة الأولى: معالجة واستخراج جدول البلان (PDF)
+    all_rows = []
+    headers = None
 
-    elif uploaded_file.name.endswith(".pdf"):
-      all_rows = []
-      headers = None
-
-      with pdfplumber.open(uploaded_file) as pdf:
-        for page in pdf.pages:
-          table = page.extract_table()
-          if table:
-            if headers is None:
-              headers = table[0]
-              rows = table[1:]
-            else:
-              rows = [
-                  row
-                  for row in table[1:]
-                  if row != headers
-                  and not any("Work Order" in str(cell) for cell in row)
-              ]
-            all_rows.extend(rows)
-
-      if all_rows and headers:
-        clean_headers = []
-        seen = {}
-        for h in headers:
-          h_str = str(h).strip() if h else ""
-          if h_str in seen:
-            seen[h_str] += 1
-            clean_headers.append(f"{h_str}_{seen[h_str]}")
+    with pdfplumber.open(plan_file) as pdf:
+      for page in pdf.pages:
+        table = page.extract_table()
+        if table:
+          if headers is None:
+            headers = table[0]
+            rows = table[1:]
           else:
-            seen[h_str] = 0
-            clean_headers.append(h_str if h_str else f"Col_{seen[h_str]}")
+            rows = [
+                row
+                for row in table[1:]
+                if row != headers
+                and not any("Work Order" in str(cell) for cell in row)
+            ]
+          all_rows.extend(rows)
 
-        df = pd.DataFrame(all_rows, columns=clean_headers)
+    if all_rows and headers:
+      clean_headers = []
+      seen = {}
+      for h in headers:
+        h_str = str(h).strip() if h else ""
+        if h_str in seen:
+          seen[h_str] += 1
+          clean_headers.append(f"{h_str}_{seen[h_str]}")
+        else:
+          seen[h_str] = 0
+          clean_headers.append(h_str if h_str else f"Col_{seen[h_str]}")
 
-        cols_list = list(df.columns)
-        rename_dict = {}
-        if len(cols_list) > 0:
-          rename_dict[cols_list[0]] = "Gauge_Specs"
-        if len(cols_list) > 1:
-          rename_dict[cols_list[1]] = "Machine"
+      df_plan = pd.DataFrame(all_rows, columns=clean_headers)
 
-        if rename_dict:
-          df = df.rename(columns=rename_dict)
+      cols_list = list(df_plan.columns)
+      rename_dict = {}
+      if len(cols_list) > 0:
+        rename_dict[cols_list[0]] = "Gauge_Specs"
+      if len(cols_list) > 1:
+        rename_dict[cols_list[1]] = "Machine"
 
-        if "Machine" in df.columns:
-          df["Machine"] = df["Machine"].ffill()
-        if "Gauge_Specs" in df.columns:
-          df["Gauge_Specs"] = df["Gauge_Specs"].ffill()
+      if rename_dict:
+        df_plan = df_plan.rename(columns=rename_dict)
 
-    if df is not None and not df.empty:
-      df.columns = [str(col).strip() for col in df.columns]
+      if "Machine" in df_plan.columns:
+        df_plan["Machine"] = df_plan["Machine"].ffill()
+      if "Gauge_Specs" in df_plan.columns:
+        df_plan["Gauge_Specs"] = df_plan["Gauge_Specs"].ffill()
 
-      # حذف الأعمدة غير المطلوبة (Start, Finish, Acs) إن وجدت
+      df_plan.columns = [str(col).strip() for col in df_plan.columns]
+
+      # حذف الأعمدة غير المطلوبة
       cols_to_drop = []
-      for col in df.columns:
+      for col in df_plan.columns:
         col_lower = col.lower()
         if (
             "start" in col_lower
@@ -113,41 +110,41 @@ if uploaded_file is not None:
         ):
           cols_to_drop.append(col)
       if cols_to_drop:
-        df = df.drop(columns=cols_to_drop)
+        df_plan = df_plan.drop(columns=cols_to_drop)
 
-      for col in df.columns:
+      for col in df_plan.columns:
         if col in ["Machine", "Gauge_Specs"]:
-          df[col] = df[col].apply(fix_reversed_text)
+          df_plan[col] = df_plan[col].apply(fix_reversed_text)
         else:
-          df[col] = df[col].apply(clean_text_single_line)
+          df_plan[col] = df_plan[col].apply(clean_text_single_line)
 
       wo_col = next(
           (
               col
-              for col in df.columns
+              for col in df_plan.columns
               if "work order" in col.lower() or "work_order" in col.lower()
           ),
           None,
       )
-      seq_col = next((col for col in df.columns if "seq" in col.lower()), None)
+      seq_col = next(
+          (col for col in df_plan.columns if "seq" in col.lower()), None
+      )
       sample_col = next(
-          (col for col in df.columns if "sample" in col.lower()), None
+          (col for col in df_plan.columns if "sample" in col.lower()), None
       )
       cust_col = next(
-          (col for col in df.columns if "customer" in col.lower()), None
+          (col for col in df_plan.columns if "customer" in col.lower()), None
       )
       proj_col = next(
-          (col for col in df.columns if "project" in col.lower()), None
+          (col for col in df_plan.columns if "project" in col.lower()), None
       )
 
       if wo_col:
-        sort_cols = [wo_col]
-        if seq_col:
-          sort_cols.append(seq_col)
-        if "Machine" in df.columns:
+        sort_cols = [wo_col, seq_col] if seq_col else [wo_col]
+        if "Machine" in df_plan.columns:
           sort_cols.append("Machine")
 
-        df_sorted = df.sort_values(by=sort_cols)
+        df_sorted = df_plan.sort_values(by=sort_cols)
 
         shared_cols_to_merge = []
         if sample_col:
@@ -176,26 +173,102 @@ if uploaded_file is not None:
         other_cols = [
             c for c in df_sorted.columns if c not in priority_cols
         ]
-        final_columns_order = priority_cols + other_cols
-        df_sorted = df_sorted[final_columns_order]
+        df_sorted = df_sorted[priority_cols + other_cols]
 
-        total_rows = len(df_sorted)
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) واستخراج البيانات للأعمدة M-R
+        if track_file.name.endswith(".csv"):
+          df_track = pd.read_csv(track_file)
+        else:
+          xls = pd.ExcelFile(track_file)
+          sheet_to_use = "OVER VIEW" if "OVER VIEW" in xls.sheet_names else xls.sheet_names[0]
+          for s in xls.sheet_names:
+            if s.strip().upper() == "OVER VIEW":
+              sheet_to_use = s
+              break
+          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=None)
+
+        track_headers = [str(c).strip() for c in df_track.iloc[0].values]
+        df_track_data = df_track.iloc[1:].copy()
+        df_track_data.columns = track_headers
+
+        # توريث أوردرات التشغيل رأسياً (ffill) لمنع أي خلايا فارغة
+        if "Work ORDER" in df_track_data.columns:
+          if isinstance(df_track_data["Work ORDER"], pd.DataFrame):
+            df_track_data.iloc[:, 2] = df_track_data.iloc[:, 2].ffill()
+          else:
+            df_track_data["Work ORDER"] = df_track_data["Work ORDER"].ffill()
+
+        # بناء قاموس التتبع للماكينات بدقة حسب هيكل الشيت
+        track_lookup = {}
+        for _, row in df_track_data.iterrows():
+          m_id_raw = ""
+          for val in row.values:
+            val_str = str(val).strip()
+            if val_str.startswith("M") and len(val_str) <= 6:
+              m_id_raw = val_str
+              break
+          if not m_id_raw and len(row.values) > 4:
+            m_id_raw = str(row.values[4]).strip()
+
+          if m_id_raw and m_id_raw != "nan":
+            m_clean = "".join(m_id_raw.split()).upper()
+            row_vals = list(row.values)
+            
+            wo_val = str(row_vals[2]) if len(row_vals) > 2 and pd.notna(row_vals[2]) else ""
+            stitch_val = str(row_vals[12]) if len(row_vals) > 12 and pd.notna(row_vals[12]) else ""
+            eco_val = str(row_vals[13]) if len(row_vals) > 13 and pd.notna(row_vals[13]) else ""
+            rem_val = str(row_vals[19]) if len(row_vals) > 19 and pd.notna(row_vals[19]) else ""
+            on_off_val = str(row_vals[24]) if len(row_vals) > 24 and pd.notna(row_vals[24]) else "ON"
+
+            track_lookup[m_clean] = {
+                "OnOff": "ON" if on_off_val.strip().upper() == "ON" else "OFF",
+                "Remaining": rem_val if rem_val != "nan" else "",
+                "WorkOrder": wo_val if wo_val != "nan" else "",
+                "StitchLength": stitch_val if stitch_val != "nan" else "",
+                "SampleNo": eco_val if eco_val != "nan" else ""
+            }
+
+        # 📌 الخطوة الثالثة: إضافة الأعمدة الجديدة من M إلى R بناءً على رقم الماكينة
+        onoff_col, rem_col, wo_mach_col, stitch_col, sample_mach_col = [], [], [], [], []
+
+        for _, row in df_sorted.iterrows():
+          raw_m = str(row.get("Machine", "")).strip()
+          m_clean = "".join(raw_m.split()).upper()
+
+          if m_clean in track_lookup:
+            data = track_lookup[m_clean]
+            onoff_col.append(data["OnOff"])
+            rem_col.append(data["Remaining"])
+            wo_mach_col.append(data["WorkOrder"])
+            stitch_col.append(data["StitchLength"])
+            sample_mach_col.append(data["SampleNo"])
+          else:
+            onoff_col.append("OFF")
+            rem_col.append("-")
+            wo_mach_col.append("-")
+            stitch_col.append("-")
+            sample_mach_col.append("-")
+
+        df_sorted["OnOff Machin"] = onoff_col
+        df_sorted["Remaining Machin"] = rem_col
+        df_sorted["Work Order"] = wo_mach_col
+        df_sorted["Stitch Length"] = stitch_col
+        df_sorted["Sampleng"] = sample_mach_col
+
         st.success(
-            f"✅ تم بنجاح تنقية الأعمدة وترتيب الهيكل | إجمالي عدد السطور:"
-            f" **{total_rows}** صف"
+            f"✅ تم دمج البلان مع الأعمدة المخصصة للتراك (M-R) بنجاح تام! | إجمالي السطور: **{len(df_sorted)}** صف"
         )
-
-        st.write("### 📊 معاينة البيانات بعد التعديل:")
+        st.write("### 📊 معاينة الجدول النهائي المدمج:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # تصدير إلى Excel مع تحديد عرض ثابت للأعمدة الكبيرة وتفعيل Wrap Text
+        # 📌 تصدير إلى Excel مع التنسيق ودمج خلايا A-L
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
               writer, index=False, sheet_name="Master_Corrected_Plan"
           )
           workbook = writer.book
-          worksheet = writer.sheets["Master_Corrected_Plan"]
+          worksheet = workbook.sheets["Master_Corrected_Plan"]
 
           from openpyxl.styles import Alignment, Font, PatternFill
 
@@ -216,9 +289,7 @@ if uploaded_file is not None:
             col_letter = col[0].column_letter
             col_name = str(col[0].value).lower()
             if "description" in col_name or "yarn" in col_name:
-              worksheet.column_dimensions[col_letter].width = 45
-            elif "note" in col_name:
-              worksheet.column_dimensions[col_letter].width = 25
+              worksheet.column_dimensions[col_letter].width = 40
             else:
               worksheet.column_dimensions[col_letter].width = 16
 
@@ -255,7 +326,7 @@ if uploaded_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # تصدير إلى PDF بتنسيق منضبط
+        # 📌 تصدير إلى PDF مرتب ومنضبط
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
@@ -270,15 +341,15 @@ if uploaded_file is not None:
         style_normal = ParagraphStyle(
             name="Normal_Table",
             fontName="Helvetica",
-            fontSize=7,
-            leading=9,
+            fontSize=6.5,
+            leading=8,
             alignment=1,
         )
         style_header = ParagraphStyle(
             name="Header_Table",
             fontName="Helvetica-Bold",
-            fontSize=8,
-            leading=10,
+            fontSize=7.5,
+            leading=9,
             textColor=colors.whitesmoke,
             alignment=1,
         )
@@ -298,17 +369,7 @@ if uploaded_file is not None:
           table_data.append(row_cells)
 
         num_cols = len(df_sorted.columns)
-        col_widths = []
-        for col_name in df_sorted.columns:
-          c_low = str(col_name).lower()
-          if "description" in c_low or "yarn" in c_low:
-            col_widths.append(110)
-          elif "note" in c_low:
-            col_widths.append(70)
-          else:
-            col_widths.append(
-                (810 - 250) / (num_cols - 2) if num_cols > 2 else 60
-            )
+        col_widths = [810 / num_cols] * num_cols
 
         pdf_table = Table(table_data, colWidths=col_widths, repeatRows=1)
         pdf_table.setStyle(
@@ -317,8 +378,8 @@ if uploaded_file is not None:
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ])
         )
 
@@ -329,9 +390,9 @@ if uploaded_file is not None:
         col1, col2 = st.columns(2)
         with col1:
           st.download_button(
-              label="📥 تحميل الملف النهائي (Excel منسق ومدمج)",
+              label="📥 تحميل الملف النهائي المدمج (Excel)",
               data=excel_data,
-              file_name="Master_Corrected_Knitting_Plan.xlsx",
+              file_name="Master_Corrected_Plan_With_Tracking.xlsx",
               mime=(
                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               ),
@@ -339,20 +400,19 @@ if uploaded_file is not None:
           )
         with col2:
           st.download_button(
-              label="📥 تحميل التقرير المرتب (PDF)",
+              label="📥 تحميل التقرير (PDF)",
               data=pdf_data,
-              file_name="Master_Corrected_Knitting_Plan.pdf",
+              file_name="Master_Corrected_Plan_With_Tracking.pdf",
               mime="application/pdf",
               use_container_width=True,
           )
 
       else:
-        st.error(
-            "لم يتم العثور على عمود الـ Work Order في الأعمدة المستخرجة."
-        )
-        st.dataframe(df, hide_index=True)
+        st.error("لم يتم العثور على عمود الـ Work Order في ملف الـ PDF.")
+    else:
+      st.error("فشل في استخراج البيانات من ملف البلان.")
 
   except Exception as e:
-    st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
+    st.error(f"حدث خطأ أثناء المعالجة والدمج: {e}")
 else:
-  st.info("الرفع متاح الآن، برجاء رفع ملف الـ Plan الفعلي للبدء.")
+  st.info("الرجاء رفع **الملفين معاً** (ملف خطة الإنتاج PDF + ملف تتبع الماكينات Excel) للبدء.")
