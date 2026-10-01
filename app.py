@@ -8,19 +8,21 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
 
 st.set_page_config(
-    page_title="Stable Knitting Plan & Tracking System", page_icon="🧵", layout="wide"
+    page_title="Knitting Plan & Tracking Integration", page_icon="🧵", layout="wide"
 )
 
-st.title("🧵 النظام المستقر لدمج البلان الأصلي مع تتبع الماكينات")
+st.title("🧵 النظام المدمج لخطة التريكو مع بيانات التراك المخصصة")
 st.write(
-    "هذا النظام يحافظ على ملف البلان الأصلي سليماً تماماً بنسبة 100% دون أي تعديل"
-    " في أسمائه أو ترتيبه، ويقوم بإضافة بيانات التراك الفعلية بجانبه بدقة."
+    "هذا النظام يحافظ على ملف البلان الأصلي سليماً تماماً بنسبة 100%، ويقوم بسحب"
+    " الأعمدة الـ 6 المطلوبة فقط من ملف التراك (Work Order, Type Qualities,"
+    " Sample, Stitch Length, Remaining, On/Off) وإضافتها كأعمدة جديدة في أقصى"
+    " اليمين بناءً على رقم الماكينة."
 )
 
 
 def fix_reversed_text(val):
   if pd.isna(val):
-    return ""
+    return val
   s = str(val).strip()
   if s:
     s = s.replace("\n", " ").replace("\r", " ")
@@ -31,7 +33,7 @@ def fix_reversed_text(val):
 
 def clean_text_single_line(val):
   if pd.isna(val):
-    return ""
+    return val
   s = str(val).strip()
   return s.replace("\n", " ").replace("\r", " ")
 
@@ -39,15 +41,19 @@ def clean_text_single_line(val):
 # 📌 واجهة رفع الملفين معاً
 col_up1, col_up2 = st.columns(2)
 with col_up1:
-  plan_file = st.file_uploader("1️⃣ اختر ملف خطة الإنتاج الأساسي (PDF)", type=["pdf"])
+  plan_file = st.file_uploader(
+      "1️⃣ اختر ملف خطة الإنتاج الأساسي (PDF)", type=["pdf"]
+  )
 with col_up2:
-  track_file = st.file_uploader("2️⃣ اختر ملف تتبع الماكينات الفعلي (Excel)", type=["xlsx", "xls", "csv"])
+  track_file = st.file_uploader(
+      "2️⃣ اختر ملف تتبع الماكينات الفعلي (Excel)", type=["xlsx", "xls", "csv"]
+  )
 
 if plan_file is not None and track_file is not None:
-  st.success("✅ تم رفع الملفين بنجاح! جاري معالجة البلان الأصلي بأمان...")
+  st.success("✅ تم رفع الملفين بنجاح! جاري المعالجة والدمج الآمن...")
 
   try:
-    # 📌 الخطوة الأولى: استخراج ومعالجة البلان الأصلي בדיוק كما اتفقنا
+    # 📌 الخطوة الأولى: معالجة البلان الأصلي تماماً كما اتفقنا
     all_rows = []
     headers = None
 
@@ -79,55 +85,77 @@ if plan_file is not None and track_file is not None:
           seen[h_str] = 0
           clean_headers.append(h_str if h_str else f"Col_{seen[h_str]}")
 
-      df_plan = pd.DataFrame(all_rows, columns=clean_headers)
+      df = pd.DataFrame(all_rows, columns=clean_headers)
 
-      # تحديد عمود الماكينة وأمر الشغل بناءً على الأسماء الأصلية للبلان
-      cols_list = list(df_plan.columns)
-      wo_col = next((c for c in cols_list if "work order" in c.lower() or "work_order" in c.lower()), cols_list[0] if len(cols_list) > 0 else None)
-      machine_col = next((c for c in cols_list if "machine" in c.lower() or "mc" in c.lower()), cols_list[1] if len(cols_list) > 1 else None)
-      seq_col = next((c for c in cols_list if "seq" in c.lower()), None)
-      sample_col = next((c for c in cols_list if "sample" in c.lower()), None)
-      cust_col = next((c for c in cols_list if "customer" in c.lower()), None)
-      proj_col = next((c for c in cols_list if "project" in c.lower()), None)
+      cols_list = list(df.columns)
+      rename_dict = {}
+      if len(cols_list) > 0:
+        rename_dict[cols_list[0]] = "Gauge_Specs"
+      if len(cols_list) > 1:
+        rename_dict[cols_list[1]] = "Machine"
 
-      if machine_col and machine_col in df_plan.columns:
-        df_plan[machine_col] = df_plan[machine_col].ffill()
-      if cols_list[0] in df_plan.columns:
-        df_plan[cols_list[0]] = df_plan[cols_list[0]].ffill()
+      if rename_dict:
+        df = df.rename(columns=rename_dict)
 
-      df_plan.columns = [str(col).strip() for col in df_plan.columns]
+      if "Machine" in df.columns:
+        df["Machine"] = df["Machine"].ffill()
+      if "Gauge_Specs" in df.columns:
+        df["Gauge_Specs"] = df["Gauge_Specs"].ffill()
 
-      # حذف أعمدة Start/Finish إن وجدت لتنظيف الشيت
+      df.columns = [str(col).strip() for col in df.columns]
+
       cols_to_drop = []
-      for col in df_plan.columns:
+      for col in df.columns:
         col_lower = col.lower()
-        if "start" in col_lower or "finish" in col_lower or col_lower in ["acs.", "acs"]:
+        if (
+            "start" in col_lower
+            or "finish" in col_lower
+            or col_lower in ["acs.", "acs"]
+        ):
           cols_to_drop.append(col)
       if cols_to_drop:
-        df_plan = df_plan.drop(columns=cols_to_drop)
+        df = df.drop(columns=cols_to_drop)
 
-      # تنظيف النصوص الأساسية مع الحفاظ على اللغة والعكس للماكينات إن لم تكن مقلوبة
-      for col in df_plan.columns:
-        if col == machine_col or col == cols_list[0]:
-          df_plan[col] = df_plan[col].apply(fix_reversed_text)
+      for col in df.columns:
+        if col in ["Machine", "Gauge_Specs"]:
+          df[col] = df[col].apply(fix_reversed_text)
         else:
-          df_plan[col] = df_plan[col].apply(clean_text_single_line)
+          df[col] = df[col].apply(clean_text_single_line)
 
-      if wo_col in df_plan.columns:
+      wo_col = next(
+          (
+              col
+              for col in df.columns
+              if "work order" in col.lower() or "work_order" in col.lower()
+          ),
+          None,
+      )
+      seq_col = next((col for col in df.columns if "seq" in col.lower()), None)
+      sample_col = next(
+          (col for col in df.columns if "sample" in col.lower()), None
+      )
+      cust_col = next(
+          (col for col in df.columns if "customer" in col.lower()), None
+      )
+      proj_col = next(
+          (col for col in df.columns if "project" in col.lower()), None
+      )
+
+      if wo_col:
         sort_cols = [wo_col]
-        if seq_col and seq_col in df_plan.columns:
+        if seq_col:
           sort_cols.append(seq_col)
-        if machine_col and machine_col in df_plan.columns:
-          sort_cols.append(machine_col)
+        if "Machine" in df.columns:
+          sort_cols.append("Machine")
 
-        df_sorted = df_plan.sort_values(by=sort_cols).reset_index(drop=True)
+        df_sorted = df.sort_values(by=sort_cols)
 
         shared_cols_to_merge = []
-        if sample_col and sample_col in df_sorted.columns:
+        if sample_col:
           shared_cols_to_merge.append(sample_col)
-        if cust_col and cust_col in df_sorted.columns:
+        if cust_col:
           shared_cols_to_merge.append(cust_col)
-        if proj_col and proj_col in df_sorted.columns:
+        if proj_col:
           shared_cols_to_merge.append(proj_col)
 
         for col in shared_cols_to_merge:
@@ -135,28 +163,53 @@ if plan_file is not None and track_file is not None:
               lambda x: x.iloc[0] if not x.empty else ""
           )
 
-        # 📌 الخطوة الثانية: قراءة ملف التراك (OVER VIEW) واستخراج الأعمدة الجديدة
+        priority_cols = [wo_col]
+        if "Machine" in df_sorted.columns:
+          priority_cols.append("Machine")
+        if seq_col and seq_col in df_sorted.columns:
+          priority_cols.append(seq_col)
+        if (
+            "Gauge_Specs" in df_sorted.columns
+            and "Gauge_Specs" not in priority_cols
+        ):
+          priority_cols.append("Gauge_Specs")
+
+        other_cols = [
+            c for c in df_sorted.columns if c not in priority_cols
+        ]
+        final_columns_order = priority_cols + other_cols
+        df_sorted = df_sorted[final_columns_order]
+
+        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) واستخراج الأعمدة الـ 6 المحددة
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
           xls = pd.ExcelFile(track_file)
-          sheet_to_use = "OVER VIEW" if "OVER VIEW" in xls.sheet_names else xls.sheet_names[0]
+          sheet_to_use = (
+              "OVER VIEW"
+              if "OVER VIEW" in xls.sheet_names
+              else xls.sheet_names[0]
+          )
           for s in xls.sheet_names:
             if s.strip().upper() == "OVER VIEW":
               sheet_to_use = s
               break
-          df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=None)
+          df_track = pd.read_excel(
+              track_file, sheet_name=sheet_to_use, header=None
+          )
 
         track_headers = [str(c).strip() for c in df_track.iloc[0].values]
         df_track_data = df_track.iloc[1:].copy()
         df_track_data.columns = track_headers
 
+        # توريث أوردرات التشغيل رأسياً (ffill) لضمان دقة القراءة في التراك
         if "Work ORDER" in df_track_data.columns:
           if isinstance(df_track_data["Work ORDER"], pd.DataFrame):
             df_track_data.iloc[:, 2] = df_track_data.iloc[:, 2].ffill()
           else:
             df_track_data["Work ORDER"] = df_track_data["Work ORDER"].ffill()
 
+        # بناء قاموس البحث للماكينات من التراك
         track_lookup = {}
         for _, row in df_track_data.iterrows():
           m_id_raw = ""
@@ -171,52 +224,104 @@ if plan_file is not None and track_file is not None:
           if m_id_raw and m_id_raw != "nan":
             m_clean = "".join(m_id_raw.split()).upper()
             row_vals = list(row.values)
-            
-            wo_val = str(row_vals[2]) if len(row_vals) > 2 and pd.notna(row_vals[2]) else ""
-            stitch_val = str(row_vals[12]) if len(row_vals) > 12 and pd.notna(row_vals[12]) else ""
-            eco_val = str(row_vals[13]) if len(row_vals) > 13 and pd.notna(row_vals[13]) else ""
-            rem_val = str(row_vals[19]) if len(row_vals) > 19 and pd.notna(row_vals[19]) else ""
-            on_off_val = str(row_vals[24]) if len(row_vals) > 24 and pd.notna(row_vals[24]) else "ON"
+
+            # المواقع الحقيقية للأعمدة المطلوبة في شيت OVER VIEW:
+            # type Qualities (col 0), Work ORDER (col 2), Stitch Length (col 12), sample no. (eco) (col 13), Remaining (col 19), on / off (col 24)
+            t_qual = (
+                str(row_vals[0])
+                if len(row_vals) > 0 and pd.notna(row_vals[0])
+                else ""
+            )
+            t_wo = (
+                str(row_vals[2])
+                if len(row_vals) > 2 and pd.notna(row_vals[2])
+                else ""
+            )
+            t_stitch = (
+                str(row_vals[12])
+                if len(row_vals) > 12 and pd.notna(row_vals[12])
+                else ""
+            )
+            t_sample = (
+                str(row_vals[13])
+                if len(row_vals) > 13 and pd.notna(row_vals[13])
+                else ""
+            )
+            t_rem = (
+                str(row_vals[19])
+                if len(row_vals) > 19 and pd.notna(row_vals[19])
+                else ""
+            )
+            t_onoff = (
+                str(row_vals[24])
+                if len(row_vals) > 24 and pd.notna(row_vals[24])
+                else "ON"
+            )
 
             track_lookup[m_clean] = {
-                "OnOff": "ON" if on_off_val.strip().upper() == "ON" else "OFF",
-                "Remaining": rem_val if rem_val != "nan" else "",
-                "WorkOrder": wo_val if wo_val != "nan" else "",
-                "StitchLength": stitch_val if stitch_val != "nan" else "",
-                "SampleNo": eco_val if eco_val != "nan" else ""
+                "Track_Work_Order": t_wo if t_wo != "nan" else "",
+                "Track_Type_Qualities": t_qual if t_qual != "nan" else "",
+                "Track_Sample_Eco": t_sample if t_sample != "nan" else "",
+                "Track_Stitch_Length": t_stitch if t_stitch != "nan" else "",
+                "Track_Remaining": t_rem if t_rem != "nan" else "",
+                "Track_OnOff": (
+                    "ON" if t_onoff.strip().upper() == "ON" else "OFF"
+                ),
             }
 
-        # 📌 الخطوة الثالثة: إضافة الأعمدة الجديدة في نهاية الجدول فقط
-        onoff_col, rem_col, wo_track_col, stitch_col, sample_track_col = [], [], [], [], []
+        # 📌 الخطوة الثالثة: جلب البيانات للأعمدة الـ 6 وإضافتها في أقصى اليمين
+        (
+            col_t_wo,
+            col_t_qual,
+            col_t_sample,
+            col_t_stitch,
+            col_t_rem,
+            col_t_onoff,
+        ) = ([], [], [], [], [], [])
 
         for _, row in df_sorted.iterrows():
-          raw_m = str(row.get(machine_col, "")).strip() if machine_col else ""
+          # البحث عن رقم الماكينة في صف البلان (العمود الثاني عادةً أو ما يسمى Machine)
+          raw_m = ""
+          for col_name in df_sorted.columns:
+            if "machine" in col_name.lower() or "mc" in col_name.lower():
+              raw_m = str(row.get(col_name, "")).strip()
+              break
+          if not raw_m and len(row) > 1:
+            raw_m = str(row.iloc[1]).strip()
+
           m_clean = "".join(raw_m.split()).upper()
 
           if m_clean in track_lookup:
-            data = track_lookup[m_clean]
-            onoff_col.append(data["OnOff"])
-            rem_col.append(data["Remaining"])
-            wo_track_col.append(data["WorkOrder"])
-            stitch_col.append(data["StitchLength"])
-            sample_track_col.append(data["SampleNo"])
+            d = track_lookup[m_clean]
+            col_t_wo.append(d["Track_Work_Order"])
+            col_t_qual.append(d["Track_Type_Qualities"])
+            col_t_sample.append(d["Track_Sample_Eco"])
+            col_t_stitch.append(d["Track_Stitch_Length"])
+            col_t_rem.append(d["Track_Remaining"])
+            col_t_onoff.append(d["Track_OnOff"])
           else:
-            onoff_col.append("OFF")
-            rem_col.append("-")
-            wo_track_col.append("-")
-            stitch_col.append("-")
-            sample_track_col.append("-")
+            col_t_wo.append("-")
+            col_t_qual.append("-")
+            col_t_sample.append("-")
+            col_t_stitch.append("-")
+            col_t_rem.append("-")
+            col_t_onoff.append("OFF")
 
-        df_sorted["OnOff Machin"] = onoff_col
-        df_sorted["Remaining Machin"] = rem_col
-        df_sorted["Work Order_Track"] = wo_track_col
-        df_sorted["Stitch Length"] = stitch_col
-        df_sorted["Sampleng"] = sample_track_col
+        # إضافة الأعمدة الجديدة في نهاية الجدول تماماً (ناحية اليمين)
+        df_sorted["Track Work Order"] = col_t_wo
+        df_sorted["Track Type Qualities"] = col_t_qual
+        df_sorted["Track Sample No."] = col_t_sample
+        df_sorted["Track Stitch Length"] = col_t_stitch
+        df_sorted["Track Remaining"] = col_t_rem
+        df_sorted["Track On/Off"] = col_t_onoff
 
+        total_rows = len(df_sorted)
         st.success(
-            f"✅ تم الحفاظ على البلان الأصلي كاملاً وإضافة التراك في اليمين بنجاح! | إجمالي السطور: **{len(df_sorted)}** صف"
+            f"✅ تم الحفاظ على البلان الأصلي كاملاً وإضافة الأعمدة الـ 6 للتراك في"
+            f" اليمين بنجاح! | إجمالي السطور: **{total_rows}** صف"
         )
-        st.write("### 📊 معاينة الجدول النهائي:")
+
+        st.write("### 📊 معاينة الجدول النهائي المدمج:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
         # 📌 تصدير إلى Excel مع تنسيق ودمج خلايا Work Order للبلان الأصلي
@@ -284,7 +389,7 @@ if plan_file is not None and track_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # 📌 تصدير إلى PDF منضبط
+        # 📌 تصدير إلى PDF مرتب ومنضبط
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
@@ -348,9 +453,9 @@ if plan_file is not None and track_file is not None:
         col1, col2 = st.columns(2)
         with col1:
           st.download_button(
-              label="📥 تحميل الملف النهائي (البلان الأصلي سليم + التراك)",
+              label="📥 تحميل الملف النهائي المدمج (Excel)",
               data=excel_data,
-              file_name="Stable_Plan_With_Tracking.xlsx",
+              file_name="Plan_With_Custom_Tracking_Cols.xlsx",
               mime=(
                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               ),
@@ -360,7 +465,7 @@ if plan_file is not None and track_file is not None:
           st.download_button(
               label="📥 تحميل التقرير (PDF)",
               data=pdf_data,
-              file_name="Stable_Plan_With_Tracking.pdf",
+              file_name="Plan_With_Custom_Tracking_Cols.pdf",
               mime="application/pdf",
               use_container_width=True,
           )
@@ -373,4 +478,7 @@ if plan_file is not None and track_file is not None:
   except Exception as e:
     st.error(f"حدث خطأ أثناء المعالجة والدمج: {e}")
 else:
-  st.info("الرجاء رفع **الملفين معاً** (ملف خطة الإنتاج PDF + ملف تتبع الماكينات Excel) للبدء.")
+  st.info(
+      "الرجاء رفع **الملفين معاً** (ملف خطة الإنتاج PDF + ملف تتبع الماكينات"
+      " Excel) للبدء."
+  )
