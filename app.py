@@ -11,11 +11,11 @@ st.set_page_config(
     page_title="Smart Knitting Plan & Tracking System", page_icon="🧵", layout="wide"
 )
 
-st.title("🧵 النظام الذكي المدمج لخطط التريكو وتتبع الماكينات (Plan & Tracking)")
+st.title("🧵 النظام الذكي لدمج البلان الأصلي مع تتبع الماكينات (Plan & Tracking)")
 st.write(
-    "قم برفع **ملف خطة الإنتاج (PDF)** وملف **تتبع الماكينات (Excel)** معاً ليقوم"
-    " النظام بمعالجة البلان من A إلى L، وسحب حالة الماكينات والأوردرات الفعلية"
-    " والمتبقي والإيكو وطول الغرزة في الأعمدة من M إلى R بدقة متناهية."
+    "هذا النظام يحافظ على ملف البلان الأصلي (من A لـ L) دون أي تغيير أو تعديل،"
+    " ويقوم بإضافة أعمدة التراك الفعلية (من M لـ R) بجانبه بدقة تامة بناءً على"
+    " رقم الماكينة."
 )
 
 
@@ -37,7 +37,7 @@ def clean_text_single_line(val):
   return s.replace("\n", " ").replace("\r", " ")
 
 
-# 📌 واجهة رفع الملفين معاً في نفس الشاشة
+# 📌 واجهة رفع الملفين معاً
 col_up1, col_up2 = st.columns(2)
 with col_up1:
   plan_file = st.file_uploader("1️⃣ اختر ملف خطة الإنتاج الأساسي (PDF)", type=["pdf"])
@@ -45,10 +45,10 @@ with col_up2:
   track_file = st.file_uploader("2️⃣ اختر ملف تتبع الماكينات الفعلي (Excel)", type=["xlsx", "xls", "csv"])
 
 if plan_file is not None and track_file is not None:
-  st.success("✅ تم رفع الملفين بنجاح! جاري المعالجة والدمج والمطابقة الذكية...")
+  st.success("✅ تم رفع الملفين بنجاح! جاري معالجة البلان الأصلي وإضافة التراك...")
 
   try:
-    # 📌 الخطوة الأولى: معالجة واستخراج جدول البلان (PDF)
+    # 📌 الخطوة الأولى: معالجة واستخراج جدول البلان (PDF) بنفس هيكله الأصلي تماماً
     all_rows = []
     headers = None
 
@@ -82,41 +82,24 @@ if plan_file is not None and track_file is not None:
 
       df_plan = pd.DataFrame(all_rows, columns=clean_headers)
 
+      # الحفاظ على الأسماء الأصلية لعمود الماكينة وأمر الشغل كما وردت في البلان تماماً
       cols_list = list(df_plan.columns)
-      rename_dict = {}
-      if len(cols_list) > 0:
-        rename_dict[cols_list[0]] = "Gauge_Specs"
-      if len(cols_list) > 1:
-        rename_dict[cols_list[1]] = "Machine"
+      machine_col_name = None
+      for c in cols_list:
+        if "machine" in c.lower() or "mc" in c.lower() or c == cols_list[1]:
+          machine_col_name = c
+          break
+      if not machine_col_name and len(cols_list) > 1:
+        machine_col_name = cols_list[1]
 
-      if rename_dict:
-        df_plan = df_plan.rename(columns=rename_dict)
-
-      if "Machine" in df_plan.columns:
-        df_plan["Machine"] = df_plan["Machine"].ffill()
-      if "Gauge_Specs" in df_plan.columns:
-        df_plan["Gauge_Specs"] = df_plan["Gauge_Specs"].ffill()
+      if machine_col_name and machine_col_name in df_plan.columns:
+        df_plan[machine_col_name] = df_plan[machine_col_name].ffill()
 
       df_plan.columns = [str(col).strip() for col in df_plan.columns]
 
-      # حذف الأعمدة غير المطلوبة
-      cols_to_drop = []
+      # تنظيف النصوص دون تغيير هيكل الأعمدة الأصلي
       for col in df_plan.columns:
-        col_lower = col.lower()
-        if (
-            "start" in col_lower
-            or "finish" in col_lower
-            or col_lower in ["acs.", "acs"]
-        ):
-          cols_to_drop.append(col)
-      if cols_to_drop:
-        df_plan = df_plan.drop(columns=cols_to_drop)
-
-      for col in df_plan.columns:
-        if col in ["Machine", "Gauge_Specs"]:
-          df_plan[col] = df_plan[col].apply(fix_reversed_text)
-        else:
-          df_plan[col] = df_plan[col].apply(clean_text_single_line)
+        df_plan[col] = df_plan[col].apply(clean_text_single_line)
 
       wo_col = next(
           (
@@ -140,11 +123,13 @@ if plan_file is not None and track_file is not None:
       )
 
       if wo_col:
-        sort_cols = [wo_col, seq_col] if seq_col else [wo_col]
-        if "Machine" in df_plan.columns:
-          sort_cols.append("Machine")
+        sort_cols = [wo_col]
+        if seq_col:
+          sort_cols.append(seq_col)
+        if machine_col_name in df_plan.columns:
+          sort_cols.append(machine_col_name)
 
-        df_sorted = df_plan.sort_values(by=sort_cols)
+        df_sorted = df_plan.sort_values(by=sort_cols).reset_index(drop=True)
 
         shared_cols_to_merge = []
         if sample_col:
@@ -159,23 +144,7 @@ if plan_file is not None and track_file is not None:
               lambda x: x.iloc[0] if not x.empty else ""
           )
 
-        priority_cols = [wo_col]
-        if "Machine" in df_sorted.columns:
-          priority_cols.append("Machine")
-        if seq_col and seq_col in df_sorted.columns:
-          priority_cols.append(seq_col)
-        if (
-            "Gauge_Specs" in df_sorted.columns
-            and "Gauge_Specs" not in priority_cols
-        ):
-          priority_cols.append("Gauge_Specs")
-
-        other_cols = [
-            c for c in df_sorted.columns if c not in priority_cols
-        ]
-        df_sorted = df_sorted[priority_cols + other_cols]
-
-        # 📌 الخطوة الثانية: قراءة ملف التراك (شيت OVER VIEW) واستخراج البيانات للأعمدة M-R
+        # 📌 الخطوة الثانية: قراءة ملف التراك واستخراج بيانات الأعمدة الجديدة (M إلى R)
         if track_file.name.endswith(".csv"):
           df_track = pd.read_csv(track_file)
         else:
@@ -191,14 +160,12 @@ if plan_file is not None and track_file is not None:
         df_track_data = df_track.iloc[1:].copy()
         df_track_data.columns = track_headers
 
-        # توريث أوردرات التشغيل رأسياً (ffill) لمنع أي خلايا فارغة
         if "Work ORDER" in df_track_data.columns:
           if isinstance(df_track_data["Work ORDER"], pd.DataFrame):
             df_track_data.iloc[:, 2] = df_track_data.iloc[:, 2].ffill()
           else:
             df_track_data["Work ORDER"] = df_track_data["Work ORDER"].ffill()
 
-        # بناء قاموس التتبع للماكينات بدقة حسب هيكل الشيت
         track_lookup = {}
         for _, row in df_track_data.iterrows():
           m_id_raw = ""
@@ -228,11 +195,11 @@ if plan_file is not None and track_file is not None:
                 "SampleNo": eco_val if eco_val != "nan" else ""
             }
 
-        # 📌 الخطوة الثالثة: إضافة الأعمدة الجديدة من M إلى R بناءً على رقم الماكينة
+        # 📌 الخطوة الثالثة: إضافة الأعمدة الجديدة (M إلى R) بجانب البلان الأصلي
         onoff_col, rem_col, wo_mach_col, stitch_col, sample_mach_col = [], [], [], [], []
 
         for _, row in df_sorted.iterrows():
-          raw_m = str(row.get("Machine", "")).strip()
+          raw_m = str(row.get(machine_col_name, "")).strip() if machine_col_name else ""
           m_clean = "".join(raw_m.split()).upper()
 
           if m_clean in track_lookup:
@@ -251,24 +218,24 @@ if plan_file is not None and track_file is not None:
 
         df_sorted["OnOff Machin"] = onoff_col
         df_sorted["Remaining Machin"] = rem_col
-        df_sorted["Work Order"] = wo_mach_col
+        df_sorted["Work Order_Track"] = wo_mach_col
         df_sorted["Stitch Length"] = stitch_col
         df_sorted["Sampleng"] = sample_mach_col
 
         st.success(
-            f"✅ تم دمج البلان مع الأعمدة المخصصة للتراك (M-R) بنجاح تام! | إجمالي السطور: **{len(df_sorted)}** صف"
+            f"✅ تم الحفاظ على البلان الأصلي كاملاً وإضافة أعمدة التراك في اليمين بنجاح! | إجمالي السطور: **{len(df_sorted)}** صف"
         )
-        st.write("### 📊 معاينة الجدول النهائي المدمج:")
+        st.write("### 📊 معاينة الجدول النهائي:")
         st.dataframe(df_sorted, use_container_width=True, hide_index=True)
 
-        # 📌 تصدير إلى Excel مع التنسيق ودمج خلايا A-L
+        # 📌 تصدير إلى Excel مع الحفاظ على تنسيق البلان الأصلي ودمج Work Order الأجنبي
         excel_output = io.BytesIO()
         with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
           df_sorted.to_excel(
               writer, index=False, sheet_name="Master_Corrected_Plan"
           )
           workbook = writer.book
-          worksheet = workbook.sheets["Master_Corrected_Plan"]
+          worksheet = workbook.active
 
           from openpyxl.styles import Alignment, Font, PatternFill
 
@@ -326,7 +293,7 @@ if plan_file is not None and track_file is not None:
 
         excel_data = excel_output.getvalue()
 
-        # 📌 تصدير إلى PDF مرتب ومنضبط
+        # 📌 تصدير إلى PDF مرتب
         pdf_output = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_output,
@@ -390,9 +357,9 @@ if plan_file is not None and track_file is not None:
         col1, col2 = st.columns(2)
         with col1:
           st.download_button(
-              label="📥 تحميل الملف النهائي المدمج (Excel)",
+              label="📥 تحميل الملف النهائي (Excel الأصلي + التراك)",
               data=excel_data,
-              file_name="Master_Corrected_Plan_With_Tracking.xlsx",
+              file_name="Original_Plan_With_Tracking_M_R.xlsx",
               mime=(
                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               ),
@@ -402,7 +369,7 @@ if plan_file is not None and track_file is not None:
           st.download_button(
               label="📥 تحميل التقرير (PDF)",
               data=pdf_data,
-              file_name="Master_Corrected_Plan_With_Tracking.pdf",
+              file_name="Original_Plan_With_Tracking_M_R.pdf",
               mime="application/pdf",
               use_container_width=True,
           )
