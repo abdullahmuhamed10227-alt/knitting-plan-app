@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الديناميكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
-st.markdown("نظام تخطيط ومتابعة التريكو - النسخة النهائية المظبوطة للربط الدقيق بالماكينة ورقم الأوردر.")
+st.markdown("نظام تخطيط ومتابعة التريكو - النسخة المتوافقة كلياً مع هيكل ملفات البلان والتراك.")
 
 col1, col2 = st.columns(2)
 
@@ -32,20 +32,35 @@ if uploaded_tracking is not None:
         df_track = df_track.fillna("")
         master_df = df_track.copy()
         
-        # 2. قراءة ملف البلان بمعزل تام
+        # 2. قراءة ملف البلان بناءً على هيكله الحقيقي
         df_plan = pd.DataFrame()
         if uploaded_plan is not None:
             st.info(f"📁 جاري معالجة ملف البلان: {uploaded_plan.name}...")
             
             if uploaded_plan.name.endswith('.xlsx'):
-                df_plan = pd.read_excel(uploaded_plan)
+                # قراءة ملف الإكسيل مع اعتبار الهيكل المكتشف (العناوين في الصف رقم 2 أو الهيدر المناسب)
+                df_plan_raw = pd.read_excel(uploaded_plan, header=None)
+                
+                # البحث عن صف العناوين الذي يحتوي على Work Order أو Seq
+                header_row_idx = 2  # بناءً على المعاينة
+                for idx, row in df_plan_raw.iterrows():
+                    row_str = str(row.values).lower()
+                    if 'work order' in row_str or 'seq' in row_str:
+                        header_row_idx = idx
+                        break
+                
+                df_plan = pd.read_excel(uploaded_plan, header=header_row_idx)
                 df_plan = df_plan.dropna(how='all').fillna("")
                 
-                required_columns = ['Work Order', 'Machine', 'Seq', 'Acs', 'Item Description', 'Sample Number', 'Ref.Note', 'Pl/Tot.Qty', 'Daily Prd.', 'Yarn Information', 'Customer Name', 'Project Name']
-                for col in required_columns:
-                    matching_col = next((c for c in df_plan.columns if col.lower().strip() in str(c).lower().strip()), None)
-                    if matching_col and matching_col != col:
-                        df_plan = df_plan.rename(columns={matching_col: col})
+                # سحب بيانات الماكينة المدمجة في الأعمدة الجانبية لو وجدت (ملء الفراغات)
+                machine_col_candidates = [c for c in df_plan.columns if 'unnamed: 1' in str(c).lower() or 'machine' in str(c).lower() or 'mc' in str(c).lower() or str(c).strip() == '1' or 'Unnamed: 1' in str(c)]
+                if len(df_plan.columns) > 1:
+                    # غالباً عمود الماكينة يكون الثاني أو الثالث
+                    possible_mc_col = df_plan.columns[1] if 'Unnamed' in str(df_plan.columns[1]) else None
+                    if possible_mc_col:
+                        df_plan[possible_mc_col] = df_plan[possible_mc_col].replace('', pd.NA).ffill()
+                
+                st.success(f"✅ تم قراءة ملف البلان (Excel) بنجاح ({len(df_plan)} صف)!")
                 
             elif uploaded_plan.name.endswith('.pdf'):
                 pdf_reader = pypdf.PdfReader(uploaded_plan)
@@ -81,13 +96,6 @@ if uploaded_tracking is not None:
                         project_match = re.search(r'\b(BU\d+_[A-Za-z0-9]+)\b', clean_line)
                         project_val = project_match.group(1) if project_match else ""
                         
-                        customers_list = ["NIKE", "ADIDAS", "PUMA", "ZARA", "TOMMY", "LACOSTE", "UNDER", "H&M"]
-                        customer_val = ""
-                        for word in tokens:
-                            if word.upper() in customers_list:
-                                customer_val = word
-                                break
-                        
                         quantities = [t for t in tokens if t.isdigit() and int(t) > 50]
                         qty_val = quantities[0] if len(quantities) > 0 else ""
                         daily_val = quantities[1] if len(quantities) > 1 else ""
@@ -96,62 +104,62 @@ if uploaded_tracking is not None:
                             "Work Order": wo_val,
                             "Machine": machine_val,
                             "Seq": seq_val if seq_val != wo_val else "",
-                            "Acs": "M" if " M " in clean_line else "",
                             "Item Description": clean_line,
                             "Sample Number": sample_no,
-                            "Ref.Note": "",
                             "Pl/Tot.Qty": qty_val if qty_val != wo_val else "",
                             "Daily Prd.": daily_val if daily_val != wo_val else "",
                             "Yarn Information": clean_line,
-                            "Customer Name": customer_val if customer_val != wo_val else "",
                             "Project Name": project_val
                         })
                 
                 if plan_rows:
                     df_plan = pd.DataFrame(plan_rows)
 
-            # 3. الربط الدقيق والمزدوج (بين الماكينة ورقم الأوردر معاً)
+            # 3. توحيد ودمج بيانات البلان مع التراك بدقة تامة لكل سطر
             if not df_plan.empty:
-                track_wo_col = next((c for c in master_df.columns if 'work order' in str(c).lower() or 'wo' in str(c).lower() or 'order' in str(c).lower()), None)
-                track_mc_col = next((c for c in master_df.columns if 'machine' in str(c).lower() or 'mc' in str(c).lower()), None)
+                # توحيد أسماء الأعمدة الأساسية في البلان لو جاءت بصيغ مختلفة
+                for col in df_plan.columns:
+                    col_str = str(col).strip().lower()
+                    if 'work order' in col_str or col_str == 'work order':
+                        df_plan = df_plan.rename(columns={col: 'Work Order'})
+                    elif 'machine' in col_str or col_str == 'machine' or col_str == 'mc':
+                        df_plan = df_plan.rename(columns={col: 'Machine'})
+                    elif 'seq' in col_str:
+                        df_plan = df_plan.rename(columns={col: 'Seq'})
+
+                track_wo_col = next((c for c in master_df.columns if any(k in str(c).lower() for k in ['work order', 'wo', 'order'])), None)
+                track_mc_col = next((c for c in master_df.columns if any(k in str(c).lower() for k in ['machine', 'mc'])), None)
                 
-                plan_wo_col = next((c for c in df_plan.columns if 'work order' in str(c).lower() or 'wo' in str(c).lower()), None)
-                plan_mc_col = next((c for c in df_plan.columns if 'machine' in str(c).lower() or 'mc' in str(c).lower()), None)
-                
-                if track_wo_col and plan_wo_col:
-                    # توحيد صيغة مفاتيح الربط لتتطابق تماماً في الطرفين
+                if 'Work Order' in df_plan.columns and track_wo_col:
                     master_df['Clean_WO'] = master_df[track_wo_col].astype(str).str.strip().str.upper()
-                    df_plan['Clean_WO'] = df_plan[plan_wo_col].astype(str).str.strip().str.upper()
+                    df_plan['Clean_WO'] = df_plan['Work Order'].astype(str).str.strip().str.upper()
                     
                     merge_keys = ['Clean_WO']
                     
-                    if track_mc_col and plan_mc_col:
+                    if 'Machine' in df_plan.columns and track_mc_col:
                         master_df['Clean_MC'] = master_df[track_mc_col].astype(str).str.strip().str.upper().str.replace('M', '', regex=True)
-                        df_plan['Clean_MC'] = df_plan[plan_mc_col].astype(str).str.strip().str.upper().str.replace('M', '', regex=True)
+                        df_plan['Clean_MC'] = df_plan['Machine'].astype(str).str.strip().str.upper().str.replace('M', '', regex=True)
                         merge_keys.append('Clean_MC')
 
-                    # إزالة أعمدة البلان القديمة من التراك لو وجدت لمنع التداخل
-                    for c in ['Work Order', 'Machine', 'Seq', 'Acs', 'Item Description', 'Sample Number', 'Ref.Note', 'Pl/Tot.Qty', 'Daily Prd.', 'Yarn Information', 'Customer Name', 'Project Name']:
-                        if c in master_df.columns:
+                    # تنظيف أعمدة البلان القديمة من التراك لعدم التكرار
+                    for c in df_plan.columns:
+                        if c in master_df.columns and c not in merge_keys:
                             master_df = master_df.drop(columns=[c])
 
-                    master_df = pd.merge(master_df, df_plan, on=merge_keys, how='left')
+                    master_df = pd.merge(master_df, df_plan, on=merge_keys, how='left', suffixes=('', '_plan'))
                     
-                    # تنظيف الأعمدة المؤقتة للربط
                     for temp_col in ['Clean_WO', 'Clean_MC']:
                         if temp_col in master_df.columns:
                             master_df = master_df.drop(columns=[temp_col])
-                        if temp_col in df_plan.columns:
-                            df_plan = df_plan.drop(columns=[temp_col])
                             
-                    st.success("✅ تم ربط بيانات البلان بالماكينة ورقم الأوردر بدقة تامة ودون أي تكرار خاطئ!")
+                    st.success("🔗 تم ربط بيانات البلان (Excel) بالماكينة ورقم الأوردر بدقة وتجنب أي تداخل!")
 
         master_df = master_df.fillna("")
 
         st.subheader("📊 التقرير النهائي المنظم:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
-        output_filename = "Master_Knitting_Report_Accurate.xlsx"
+        output_filename = "Master_Knitting_Report_Perfect_Excel.xlsx"
         master_df.to_excel(output_filename, index=False)
         
         with open(output_filename, "rb") as file:
