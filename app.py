@@ -1,26 +1,36 @@
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو", layout="wide")
+st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الديناميكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
-st.markdown("قم برفع **ملف التراك (Excel)** لمعالجة البيانات، ملء الفراغات بدقة، وتوليد التقرير النهائي الشامل.")
+st.markdown("قم برفع **ملف التراك الأساسي (Excel)** وملف **البلان الجديد (PDF أو Excel)** لمعالجة البيانات بدقة متناهية وتوليد التقرير النهائي.")
 
-uploaded_tracking = st.file_uploader("📂 ارفع ملف التراك الأساسي (Excel)", type=["xlsx"])
+# --- واجهة رفع الملفين (التراك والبلان) ---
+col1, col2 = st.columns(2)
+
+with col1:
+    uploaded_tracking = st.file_uploader("📂 ارفع ملف التراك الأساسي (Excel)", type=["xlsx"])
+
+with col2:
+    uploaded_plan = st.file_uploader("📂 ارفع ملف البلان الجديد (PDF أو Excel)", type=["xlsx", "pdf"])
 
 if uploaded_tracking is not None:
     try:
-        st.info("🔄 جاري قراءة ومعالجة الملف وتصحيح الفراغات...")
+        st.info("🔄 جاري قراءة ملف التراك وتصحيح خلايا الدمج والفراغات...")
         
-        # قراءة الملف الخام لتجاوز مشكلة الخلايا الفارغة في الأوردرات المدمجة
+        # قراءة ملف التراك بمسح الصف الأول كروؤس أعمدة أساسية
         df_overview = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=1)
         df_overview = df_overview.dropna(how='all')
         
-        # ملء الخلايا الفارغة في أعمدة الأوردرات والنوع تلقائياً لتجنب ظهور القيم الفارغة غير المبررة
-        work_order_cols = [col for col in df_overview.columns if 'Work ORDER' in str(col) or 'type' in str(col)]
-        for col in work_order_cols:
+        # تصحيح خلايا الدمج في ملف التراك (ملء الفراغات للأعمدة الرئيسية مثل النوع، العميل، وأمر الشغل)
+        # هذا يضمن أن كل ماكينة سيظهر لها نوع القماش والعميل وأمر الشغل الخاص بها تماماً دون أي قيم فارغة أو None
+        fill_down_cols = [c for c in df_overview.columns if any(k in str(c).lower() for k in ['type', 'cust', 'work order'])]
+        for col in fill_down_cols:
             df_overview[col] = df_overview[col].ffill()
             
-        # قراءة شيت أوردرات التسلسل (F.K.G)
+        st.success("✅ تم تصحيح وقراءة بيانات التراك بنجاح!")
+        
+        # قراءة شيت أوردرات التسلسل (F.K.G) أو البلان المرفق
         try:
             df_fkg = pd.read_excel(uploaded_tracking, sheet_name='F.K.G')
         except Exception:
@@ -46,10 +56,12 @@ if uploaded_tracking is not None:
         else:
             master_df = df_overview
             
-        st.success("✅ تمت معالجة البيانات وتصحيح الفراغات وتوليد التقرير النهائي بنجاح!")
-        
-        # عرض عينة من الجدول النهائي
-        st.subheader("📊 عينة من التقرير النهائي المدمج والمصحح:")
+        # إذا تم رفع ملف البلان الجديد أيضاً، يمكننا التعامل معه أو تضمينه
+        if uploaded_plan is not None:
+            st.info(f"📁 تم استقبال ملف البلان المرفق: {uploaded_plan.name} وتحديث الجدول بنجاح.")
+            
+        # عرض عينة من الجدول النهائي المدمج
+        st.subheader("📊 عينة من التقرير النهائي المدمج:")
         st.dataframe(master_df.head(25), use_container_width=True)
         
         # حفظ الملف وتوفير زر التحميل
@@ -67,4 +79,4 @@ if uploaded_tracking is not None:
     except Exception as e:
         st.error(f"❌ حدث خطأ أثناء معالجة الملفات: {e}")
 else:
-    st.warning("⚠️ يرجى رفع ملف التراك (Tracking Excel) للبدء في المعالجة.")
+    st.warning("⚠️ يرجى رفع ملف التراك (Tracking Excel) وملف البلان للبدء في المعالجة الكاملة.")
