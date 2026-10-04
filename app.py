@@ -3,7 +3,7 @@ import streamlit as st
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الديناميكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
-st.markdown("قم برفع **ملف التراك الأساسي (Excel)** وملف **البلان الجديد** لمعالجة البيانات ومطابقتها تماماً لأصل الملفات.")
+st.markdown("قم برفع **ملف التراك الأساسي (Excel)** وملف **البلان الجديد** لمعالجة الخلايا المدمجة بدقة تامة ومطابقة أصل الملفات.")
 
 col1, col2 = st.columns(2)
 
@@ -15,19 +15,26 @@ with col2:
 
 if uploaded_tracking is not None:
     try:
-        st.info("🔄 جاري قراءة ملف التراك ومعالجة الخلايا بدقة تامة...")
+        st.info("🔄 جاري قراءة ملف التراك ومعالجة الخلايا المدمجة...")
         
-        # 1. قراءة ملف التراك مع الحفاظ على الهيكل الأصلي
+        # 1. قراءة شيت التتبع الأساسي (OVER VIEW)
         df_track = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=1)
         df_track = df_track.dropna(how='all')
         
-        # استبدال القيم الفارغة لتعرض بشكل طبيعي مطابق للإكسيل
+        # المعالجة الذكية للخلايا المدمجة (Merged Cells):
+        # تكرار القيم في الأعمدة الإجمالية (مثل ERP ROLLS و Unnamed وغيرها) بناءً على الأوردر المشترك
+        merge_columns_to_fill = ['ERP ROLLS', 'Roll / Mc  ERP', 'Unnamed: 21', 'Work ORDER', 'type Qualities', 'CUSTMER']
+        for col in merge_columns_to_fill:
+            if col in df_track.columns:
+                df_track[col] = df_track[col].ffill()
+        
+        # استبدال أي فراغات متبقية بنصوص فارغة نظيفة
         df_track = df_track.fillna("")
         master_df = df_track.copy()
         
-        # 2. قراءة ملف البلان المرفق (إن وجد) ودمجه
+        # 2. قراءة ملف البلان المرفق (إن وجد)
         if uploaded_plan is not None:
-            st.info(f"📁 جاري قراءة وتحليل ملف البلان: {uploaded_plan.name}...")
+            st.info(f"📁 جاري تحليل ملف البلان المرفق: {uploaded_plan.name}...")
             
             if uploaded_plan.name.endswith('.xlsx'):
                 df_plan = pd.read_excel(uploaded_plan)
@@ -38,15 +45,15 @@ if uploaded_tracking is not None:
                 
                 if mc_col_track and mc_col_plan:
                     master_df = pd.merge(master_df, df_plan, left_on=mc_col_track, right_on=mc_col_plan, how='left', suffixes=('', '_plan'))
-                    st.success("✅ تم دمج ملف البلان بنجاح تام!")
+                    st.success("✅ تم دمج بيانات ملف البلان بدقة حرفية تامة!")
                 else:
                     master_df = pd.concat([master_df.reset_index(drop=True), df_plan.reset_index(drop=True)], axis=1)
-                    st.success("✅ تم إرفاق أعمدة البلان بجوار جدول التراك!")
+                    st.success("✅ تم إرفاق أعمدة ملف البلان بجانب جدول التراك!")
             else:
-                st.warning("⚠️ يرجى رفع ملف البلان بصيغة Excel لضمان مطابقة الأعمدة ودمجها بدقة.")
+                st.warning("⚠️ يرجى رفع ملف البلان بصيغة Excel لضمان دمج الأعمدة بدقة.")
         
-        # عرض الجدول النهائي المطابق
-        st.subheader("📊 التقرير النهائي المطابق لأصل الملفات:")
+        # عرض التقرير النهائي المنظم والخالي من الفراغات المزعجة في الدمج
+        st.subheader("📊 التقرير النهائي المطابق لأصل الملفات (مع معالجة الدمج):")
         st.dataframe(master_df.head(25), use_container_width=True)
         
         # زر التحميل المباشر بصيغة Excel
@@ -62,6 +69,6 @@ if uploaded_tracking is not None:
             )
             
     except Exception as e:
-        st.error(f"❌ حدث خطأ أثناء قراءة الملفات: {e}")
+        st.error(f"❌ حدث خطأ أثناء المعالجة: {e}")
 else:
     st.warning("⚠️ يرجى رفع ملف التراك (Tracking Excel) وملف البلان للبدء.")
