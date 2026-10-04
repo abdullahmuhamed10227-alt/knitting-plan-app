@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الديناميكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
-st.markdown("نظام تخطيط ومتابعة التريكو - الحفاظ على ملف التراك الأصلي وربط البلان بدقة.")
+st.markdown("نظام تخطيط ومتابعة التريكو - النسخة النهائية المظبوطة لربط بيانات البلان بدقة.")
 
 col1, col2 = st.columns(2)
 
@@ -19,18 +19,18 @@ if uploaded_tracking is not None:
     try:
         st.info("🔄 جاري قراءة ملف التراك الأساسي...")
         
-        # 1. قراءة ملف التراك الأساسي والحفاظ عليه تماماً كما هو
+        # 1. قراءة ملف التراك الأساسي والحفاظ عليه تماماً
         df_track = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=1)
         df_track = df_track.dropna(how='all')
         
-        # تنظيف الدمج للأعمدة الرئيسية في التراك فقط
+        # تنظيف الدمج للأعمدة الرئيسية في التراك
         merge_columns_to_fill = ['ERP ROLLS', 'Roll / Mc  ERP', 'Unnamed: 21', 'Work ORDER', 'type Qualities', 'CUSTMER']
         for col in merge_columns_to_fill:
             if col in df_track.columns:
                 df_track[col] = df_track[col].ffill()
                 
         df_track = df_track.fillna("")
-        master_df = df_track.copy() # ملف التراك الأساسي سليم 100%
+        master_df = df_track.copy()
         
         # 2. قراءة ملف البلان بمعزل تام
         df_plan = pd.DataFrame()
@@ -113,30 +113,33 @@ if uploaded_tracking is not None:
                 if plan_rows:
                     df_plan = pd.DataFrame(plan_rows)
 
-            # 3. إضافه أعمدة البلان بجانب التراك بوضوح وبدون تدمير أعمدة التراك الأصلية
+            # 3. الربط السليم والمؤكد برقم الأوردر
             if not df_plan.empty:
                 track_wo_col = next((c for c in master_df.columns if 'work order' in str(c).lower() or 'wo' in str(c).lower() or 'order' in str(c).lower()), None)
                 plan_wo_col = next((c for c in df_plan.columns if 'work order' in str(c).lower() or 'wo' in str(c).lower()), None)
                 
                 if track_wo_col and plan_wo_col:
-                    master_df[track_wo_col] = master_df[track_wo_col].astype(str).str.strip()
-                    df_plan[plan_wo_col] = df_plan[plan_wo_col].astype(str).str.strip()
+                    # توحيد صيغة الأوردر للطرفين تماماً لمنع خطأ عدم التطابق
+                    master_df['Clean_WO'] = master_df[track_wo_col].astype(str).str.strip().str.upper()
+                    df_plan['Clean_WO'] = df_plan[plan_wo_col].astype(str).str.strip().str.upper()
                     
-                    # إزالة أي أعمدة بلان قديمة لو متكررة لضمان نظافة الجدول
-                    plan_cols_to_use = [c for c in df_plan.columns if c != plan_wo_col]
-                    for c in plan_cols_to_use:
+                    # إزالة أعمدة البلان القديمة لو وجدت
+                    for c in ['Work Order', 'Seq', 'Acs', 'Item Description', 'Sample Number', 'Ref.Note', 'Pl/Tot.Qty', 'Daily Prd.', 'Yarn Information', 'Customer Name', 'Project Name']:
                         if c in master_df.columns:
                             master_df = master_df.drop(columns=[c])
-                            
-                    master_df = pd.merge(master_df, df_plan, left_on=track_wo_col, right_on=plan_wo_col, how='left')
-                    st.success("✅ تم الحفاظ على ملف التراك الأصلي وربط بيانات البلان بدقة تامة!")
+
+                    master_df = pd.merge(master_df, df_plan, on='Clean_WO', how='left')
+                    if 'Clean_WO' in master_df.columns:
+                        master_df = master_df.drop(columns=['Clean_WO'])
+                        
+                    st.success("✅ تم ربط بيانات البلان بتراك الأساسي بنجاح تام وملء الأعمدة بدقة!")
 
         master_df = master_df.fillna("")
 
         st.subheader("📊 التقرير النهائي المنظم:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
-        output_filename = "Master_Knitting_Report_Clean_Final.xlsx"
+        output_filename = "Master_Knitting_Report_Synced.xlsx"
         master_df.to_excel(output_filename, index=False)
         
         with open(output_filename, "rb") as file:
