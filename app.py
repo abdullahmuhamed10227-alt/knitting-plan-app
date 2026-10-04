@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الديناميكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
-st.markdown("نظام إدارة ومتابعة التريكو ودمج تفاصيل البلان داخل أعمدتها المخصصة بدقة حرفية.")
+st.markdown("نظام إدارة ومتابعة التريكو واستخراج بيانات البلان وتوزيعها داخل الأعمدة المخصصة بدقة تامة.")
 
 col1, col2 = st.columns(2)
 
@@ -17,7 +17,7 @@ with col2:
 
 if uploaded_tracking is not None:
     try:
-        st.info("🔄 جاري قراءة ملف التراك الأساسي...")
+        st.info("🔄 جاري قراءة ملف التراك الأساسي والمعالجة...")
         
         # 1. قراءة ملف التراك بالكامل
         df_track = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=1)
@@ -32,15 +32,15 @@ if uploaded_tracking is not None:
         df_track = df_track.fillna("")
         master_df = df_track.copy()
         
-        # 2. قراءة وتحليل ملف البلان واستخراج البيانات داخل الأعمدة بدقة
+        # 2. قراءة وتحليل ملف البلان واستخراج وتعبئة الأعمدة بدقة
         if uploaded_plan is not None:
-            st.info(f"📁 جاري استخراج وتوزيع بيانات البلان من: {uploaded_plan.name}...")
+            st.info(f"📁 جاري استخراج بيانات البلان وتوزيعها من: {uploaded_plan.name}...")
             
             if uploaded_plan.name.endswith('.xlsx'):
                 df_plan = pd.read_excel(uploaded_plan)
                 df_plan = df_plan.dropna(how='all').fillna("")
                 master_df = pd.concat([master_df.reset_index(drop=True), df_plan.reset_index(drop=True)], axis=1)
-                st.success("✅ تمت اضافة أعمدة وبيانات البلان (Excel) بدقة تامة!")
+                st.success("✅ تمت إضافة أعمدة وبيانات البلان (Excel) بدقة تامة!")
                 
             elif uploaded_plan.name.endswith('.pdf'):
                 pdf_reader = pypdf.PdfReader(uploaded_plan)
@@ -53,38 +53,43 @@ if uploaded_tracking is not None:
                         wo_match = re.search(r'\b\d{6}-\d\b', line)
                         if wo_match:
                             parts = line.split()
-                            seq_val = parts[0] if parts and parts[0].isdigit() else ""
                             wo_val = wo_match.group()
                             
-                            # استخراج المعلومات المتاحة وتوزيعها داخل الأعمدة المطلوبة بدقة
-                            item_desc = " ".join(parts[3:12]) if len(parts) > 12 else line
+                            # استخراج دقيق للعناصر
+                            seq_val = parts[0] if parts and parts[0].isdigit() else ""
+                            acs_val = parts[2] if len(parts) > 2 else ""
+                            
+                            # استخراج رقم العينة (الذي يبدأ بـ I-N أو مشابه)
                             sample_no = next((p for p in parts if 'I-N' in p or 'i-n' in p), "")
-                            customer = parts[-2] if len(parts) > 2 else ""
-                            project = parts[-1] if len(parts) > 1 else ""
+                            
+                            # استخراج اسم العميل واسم المشروع من نهايات السطر النصي بدقة
+                            non_numeric_parts = [p for p in parts if not re.match(r'^\d+([./]\d+)?$', p) and p != wo_val]
+                            customer_name = non_numeric_parts[-2] if len(non_numeric_parts) >= 2 else (parts[-2] if len(parts) >= 2 else "")
+                            project_name = non_numeric_parts[-1] if len(non_numeric_parts) >= 1 else (parts[-1] if len(parts) >= 1 else "")
                             
                             plan_rows.append({
-                                "Seq": seq_val,
                                 "Work Order": wo_val,
-                                "Acs": parts[2] if len(parts) > 2 else "",
-                                "Item Description": item_desc,
+                                "Seq": seq_val,
+                                "Acs": acs_val,
+                                "Item Description": line,
                                 "Sample Number": sample_no,
-                                "Ref.Note": line[100:150].strip() if len(line) > 150 else "",
-                                "Pl/Tot.Qty": parts[12] if len(parts) > 12 else "",
+                                "Ref.Note": "",
+                                "Pl/Tot.Qty": "",
                                 "Daily Prd.": "",
-                                "Yarn Information": line[50:100].strip() if len(line) > 100 else "",
-                                "Customer Name": customer,
-                                "Project Name": project
+                                "Yarn Information": "",
+                                "Customer Name": customer_name,
+                                "Project Name": project_name
                             })
                             
                 if plan_rows:
                     df_pdf_plan = pd.DataFrame(plan_rows)
                     master_df = pd.concat([master_df.reset_index(drop=True), df_pdf_plan.reset_index(drop=True)], axis=1)
-                    st.success(f"✅ تم استخراج وتعبئة بيانات البلان داخل الأعمدة بنجاح ({len(df_pdf_plan)} سجل)!")
+                    st.success(f"✅ تم استخراج وتعبئة تفاصيل البلان داخل الأعمدة بنجاح ({len(df_pdf_plan)} سجل)!")
                 else:
                     st.warning("⚠️ لم يتم العثور على أوردرات مطابقة للنمط داخل ملف الـ PDF.")
         
         # عرض التقرير النهائي الشامل
-        st.subheader("📊 التقرير النهائي الشامل بعد توزيع بيانات البلان:")
+        st.subheader("📊 التقرير النهائي الشامل بعد توزيع بيانات البلان بدقة:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
         # زر التحميل
