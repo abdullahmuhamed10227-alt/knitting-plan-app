@@ -4,13 +4,14 @@ import pdfplumber
 import streamlit as st
 
 st.set_page_config(
-    page_title="Master Knitting & Tracking System", page_icon="🧵", layout="wide"
+    page_title="Master Knitting & Tracking System Pro", page_icon="🧵", layout="wide"
 )
 
-st.title("🧵 النظام الهندسي المتكامل لربط البلان بالتراك (القاعدة الشاملة للماكينات)")
+st.title("🧵 النظام الهندسي المتكامل لربط البلان بالتراك (النسخة المصححة والدقيقة)")
 st.write(
-    "يعتمد هذا النظام على دمج ملف البلان مع القاعدة الشاملة للماكينات في التراك،"
-    " لضمان ظهور كافة الماكينات (الشاغلة والواقفة) مع بياناتها بدقة تامة."
+    "هذا النظام يرتب الجدول بناءً على خطة الإنتاج (البلان) أولاً، ثم يدمج"
+    " القاعدة الشاملة للماكينات من التراك بدقة تامة، مع احترام حالات التشغيل"
+    " الفعلي (ON / OFF) لكل ماكينة بدون أي تداخل."
 )
 
 
@@ -34,11 +35,11 @@ with col_up2:
   )
 
 if plan_file is not None and track_file is not None:
-  st.success("✅ تم رفع الملفين بنجاح! جاري مطابقة الماكينات ودمج البيانات...")
+  st.success("✅ تم رفع الملفين بنجاح! جاري معالجة وترتيب البيانات بدقة...")
 
   try:
     # 📌 1. استخراج بيانات البلان من الـ PDF
-    plan_data = []
+    plan_rows = []
     with pdfplumber.open(plan_file) as pdf:
       for page in pdf.pages:
         tables = page.extract_tables()
@@ -51,9 +52,9 @@ if plan_file is not None and track_file is not None:
             ):
               continue
             if len(cleaned) >= 2 and cleaned[1]:
-              plan_data.append(cleaned)
+              plan_rows.append(cleaned)
 
-    # 📌 2. قراءة ملف التراك الشامل (OVER VIEW)
+    # 📌 2. قراءة ملف التراك الشامل (OVER VIEW) بدون ffill مدمر للحالات
     if track_file.name.endswith(".csv"):
       df_track = pd.read_csv(track_file)
     else:
@@ -65,16 +66,15 @@ if plan_file is not None and track_file is not None:
         if s.strip().upper() == "OVER VIEW":
           sheet_to_use = s
           break
-      df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=None)
+      df_track = pd.read_excel(
+          track_file, sheet_sheet=sheet_to_use, header=None
+      )
 
     track_headers = [str(c).strip() for c in df_track.iloc[1].values]
     df_track_data = df_track.iloc[2:].copy()
     df_track_data.columns = track_headers
 
-    df_track_data.iloc[:, 2] = df_track_data.iloc[:, 2].ffill()  # Work ORDER
-    df_track_data.iloc[:, 0] = df_track_data.iloc[:, 0].ffill()  # type Qualities
-
-    # بناء قاموس التراك الشامل لكل ماكينة
+    # بناء قاموس التراك الفعلي لكل ماكينة بدقة
     track_lookup = {}
     for _, row in df_track_data.iterrows():
       row_vals = list(row.values)
@@ -113,67 +113,115 @@ if plan_file is not None and track_file is not None:
             else "OFF"
         )
 
+        # التصحيح الهام: إذا كانت الماكينة OFF أو ليس لها أوردر شغل في التراك، يترك الـ Work Order فارغاً تماماً
+        is_on = t_onoff.upper() == "ON"
+        final_wo = t_wo if (is_on and t_wo and t_wo != "nan") else ""
+
         track_lookup[m_clean] = {
             "Machine": m_id_raw,
-            "Track Work Order": t_wo if t_wo != "nan" else "",
+            "Track Work Order": final_wo,
             "Track Type Qualities": t_qual if t_qual != "nan" else "",
             "Track Sample No.": t_sample if t_sample != "nan" else "",
             "Track Stitch Length": t_stitch if t_stitch != "nan" else "",
             "Track Remaining": t_rem if t_rem != "nan" else "",
-            "Track On/Off": "ON" if t_onoff.upper() == "ON" else "OFF",
+            "Track On/Off": "ON" if is_on else "OFF",
         }
 
-    # تحويل الماكينات الشاملة من التراك إلى جدول أساسي، ودمج بيانات البلان عليها
-    master_rows = []
+    # 📌 3. بناء الجدول المدمج بحيث نبدأ بترتيب البلان أولاً
     import re
 
-    # استخراج معلومات البلان في ديكشنري مفهرس برقم الماكينة أو أوردر الشغل
-    plan_dict = {}
-    for p_row in plan_data:
+    master_rows = []
+    processed_machines = set()
+
+    # معالجة ماكينات البلان أولاً لضمان ترتيبها بالأسلوب المتفق عليه
+    for p_row in plan_rows:
+      p_wo = p_row[1] if len(p_row) > 1 else ""
+      p_desc = p_row[3] if len(p_row) > 3 else ""
+      p_sample = p_row[4] if len(p_row) > 4 else ""
+      p_cust = p_row[11] if len(p_row) > 11 else ""
+
       p_text = " ".join(p_row)
       m_match = re.search(r"\b(M\d{3,4}|T\d{3,4})\b", p_text)
-      if m_match:
-        m_key = "".join(m_match.group(1).split()).upper()
-        plan_dict[m_key] = p_row
+      m_clean = (
+          "".join(m_match.group(1).split()).upper() if m_match else "UNKNOWN"
+      )
+      m_raw = m_match.group(1) if m_match else ""
 
-    # دمج القائمتين بناءً على الماكينات الموجودة في التراك
+      # جلب بيانات التراك لهذه الماكينة إن وجدت
+      t_data = track_lookup.get(
+          m_clean,
+          {
+              "Machine": m_raw,
+              "Track Work Order": "",
+              "Track Type Qualities": "",
+              "Track Sample No.": "",
+              "Track Stitch Length": "",
+              "Track Remaining": "",
+              "Track On/Off": "ON",
+          },
+      )
+
+      combined = {
+          "Machine": m_raw if m_raw else m_clean,
+          "Plan Work Order": p_wo,
+          "Item Description": p_desc,
+          "Sample Number": p_sample,
+          "Customer Name": p_cust,
+          "Track Work Order": t_data["Track Work Order"],
+          "Track Type Qualities": t_data["Track Type Qualities"],
+          "Track Sample No.": t_data["Track Sample No."],
+          "Track Stitch Length": t_data["Track Stitch Length"],
+          "Track Remaining": t_data["Track Remaining"],
+          "Track On/Off": t_data["Track On/Off"],
+      }
+      master_rows.append(combined)
+      if m_clean != "UNKNOWN":
+        processed_machines.add(m_clean)
+
+    # إضافة باقي ماكينات المصنع (التي لم تورد في البلان أو الواقفة OFF) لتكتمل القاعدة الشاملة
     for m_clean, t_data in track_lookup.items():
-      combined_row = t_data.copy()
-      if m_clean in plan_dict:
-        p_row = plan_dict[m_clean]
-        combined_row["Plan Work Order"] = p_row[1] if len(p_row) > 1 else ""
-        combined_row["Item Description"] = p_row[3] if len(p_row) > 3 else ""
-        combined_row["Sample Number"] = p_row[4] if len(p_row) > 4 else ""
-        combined_row["Customer Name"] = p_row[11] if len(p_row) > 11 else ""
-      else:
-        combined_row["Plan Work Order"] = ""
-        combined_row["Item Description"] = "ماكينة متوقفة / بدون خطة حالية"
-        combined_row["Sample Number"] = ""
-        combined_row["Customer Name"] = ""
-      master_rows.append(combined_row)
+      if m_clean not in processed_machines:
+        combined = {
+            "Machine": t_data["Machine"],
+            "Plan Work Order": "",
+            "Item Description": (
+                "ماكينة متوقفة / بدون خطة في البلان"
+                if t_data["Track On/Off"] == "OFF"
+                else "ماكينة عاملة / غير مدرجة في البلان الحالي"
+            ),
+            "Sample Number": "",
+            "Customer Name": "",
+            "Track Work Order": t_data["Track Work Order"],
+            "Track Type Qualities": t_data["Track Type Qualities"],
+            "Track Sample No.": t_data["Track Sample No."],
+            "Track Stitch Length": t_data["Track Stitch Length"],
+            "Track Remaining": t_data["Track Remaining"],
+            "Track On/Off": t_data["Track On/Off"],
+        }
+        master_rows.append(combined)
 
     df_master = pd.DataFrame(master_rows)
 
     st.success(
-        f"✅ تم دمج قاعدة الماكينات الشاملة بنجاح تام! | إجمالي الماكينات في"
-        f" النظام: **{len(df_master)}** ماكينة"
+        f"✅ تم ضبط الترتيب والحالات بنجاح تام! | إجمالي السطور المعروضة:"
+        f" **{len(df_master)}** صف"
     )
 
-    st.write("### 📊 معاينة الجدول الشامل المدمج:")
+    st.write("### 📊 معاينة الجدول النهائي المرتب والمصحح:")
     st.dataframe(df_master, use_container_width=True, hide_index=True)
 
     # تصدير إلى Excel
     excel_output = io.BytesIO()
     with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
       df_master.to_excel(
-          writer, index=False, sheet_name="Master_Machines_Tracking"
+          writer, index=False, sheet_name="Master_Ordered_Plan"
       )
     excel_data = excel_output.getvalue()
 
     st.download_button(
-        label="📥 تحميل الشامل المدمج (Excel)",
+        label="📥 تحميل الملف النهائي المرتب (Excel)",
         data=excel_data,
-        file_name="Master_Machines_Tracking.xlsx",
+        file_name="Master_Ordered_Plan.xlsx",
         mime=(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
@@ -183,7 +231,4 @@ if plan_file is not None and track_file is not None:
   except Exception as e:
     st.error(f"حدث خطأ أثناء المعالجة: {e}")
 else:
-  st.info(
-      "الرجاء رفع الملفين معاً (البلان PDF + التراك Excel) لاعتماد القاعدة"
-      " الشاملة."
-  )
+  st.info("الرجاء رفع ملف البلان (PDF) وملف التراك (Excel) معاً للبدء.")
