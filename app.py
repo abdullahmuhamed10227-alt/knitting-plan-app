@@ -1,71 +1,72 @@
 import pandas as pd
-import glob
-import os
 import streamlit as st
 
-st.title("نظام تخطيط ومتابعة التريكو الديناميكي")
+st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو", layout="wide")
+st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
+st.markdown("قم برفع **ملف التراك (Excel)** وملف **البلان الجديد** يومياً لمعالجة البيانات وتوليد التقرير النهائي.")
 
-def generate_master_knitting_report():
-    # البحث التلقائي عن ملف التراك في مجلد المشروع بدلاً من استخدام اسم ثابت
-    excel_files = glob.glob('*.xlsx')
-    tracking_files = [f for f in excel_files if 'TRACKING' in f or 'M..C' in f]
-    
-    if not tracking_files:
-        raise FileNotFoundError("لم يتم العثور على ملف التراك (Tracking Excel File) في المجلد!")
-    
-    # اختيار الملف المتاح
-    tracking_filepath = tracking_files[0]
-    print(f"جاري استخدام ملف التراك: {tracking_filepath}")
-    st.info(f"جاري استخدام ملف التراك: {tracking_filepath}")
-    
-    xls = pd.ExcelFile(tracking_filepath)
-    
-    # قراءة شيت التتبع الأساسي (OVER VIEW)
-    df_overview = pd.read_excel(tracking_filepath, sheet_name='OVER VIEW', header=1)
-    df_overview = df_overview.dropna(how='all')
-    
-    # قراءة شيت أوردرات التسلسل (F.K.G)
+# --- قسم رفع الملفات من الواجهة ---
+col1, col2 = st.columns(2)
+
+with col1:
+    uploaded_tracking = st.file_uploader("📂 ارفع ملف التراك الأساسي (Excel)", type=["xlsx"])
+
+with col2:
+    uploaded_plan = st.file_uploader("📂 ارفع ملف البلان الجديد (PDF أو Excel)", type=["xlsx", "pdf"])
+
+if uploaded_tracking is not None:
     try:
-        df_fkg = pd.read_excel(tracking_filepath, sheet_name='F.K.G')
-    except Exception:
-        df_fkg = pd.DataFrame()
+        st.info("🔄 جاري قراءة ومعالجة الملفات...")
         
-    if not df_fkg.empty and 'Machine No' in df_fkg.columns and 'Sira' in df_fkg.columns:
-        df_fkg_pivot = df_fkg.pivot_table(
-            index='Machine No',
-            columns='Sira',
-            values=['Work Order Name', 'is Emri Kalemi', 'Fabric Code', 'Planned Qty', 'Remained Qty', 'Release Date'],
-            aggfunc='first'
-        )
-        df_fkg_pivot.columns = [f"Seq_{s}_{val}" for val, s in df_fkg_pivot.columns]
-        df_fkg_pivot = df_fkg_pivot.reset_index()
+        # قراءة شيت التتبع الأساسي (OVER VIEW) من ملف التراك المرفق
+        df_overview = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=1)
+        df_overview = df_overview.dropna(how='all')
         
-        mc_col_candidates = [c for c in df_overview.columns if 'machine' in str(c).lower() or 'Machine NO' in str(c)]
-        if mc_col_candidates:
-            mc_col = mc_col_candidates[0]
-            master_df = pd.merge(df_overview, df_fkg_pivot, left_on=mc_col, right_on='Machine No', how='left')
+        # قراءة شيت أوردرات التسلسل (F.K.G) من ملف التراك
+        try:
+            df_fkg = pd.read_excel(uploaded_tracking, sheet_name='F.K.G')
+        except Exception:
+            df_fkg = pd.DataFrame()
+            
+        # معالجة وتوزيع أوردرات البلان في أعمدة جديدة على اليمين (حسب السيكونس Sira)
+        if not df_fkg.empty and 'Machine No' in df_fkg.columns and 'Sira' in df_fkg.columns:
+            df_fkg_pivot = df_fkg.pivot_table(
+                index='Machine No',
+                columns='Sira',
+                values=['Work Order Name', 'is Emri Kalemi', 'Fabric Code', 'Planned Qty', 'Remained Qty', 'Release Date'],
+                aggfunc='first'
+            )
+            df_fkg_pivot.columns = [f"Seq_{s}_{val}" for val, s in df_fkg_pivot.columns]
+            df_fkg_pivot = df_fkg_pivot.reset_index()
+            
+            mc_col_candidates = [c for c in df_overview.columns if 'machine' in str(c).lower() or 'Machine NO' in str(c)]
+            if mc_col_candidates:
+                mc_col = mc_col_candidates[0]
+                master_df = pd.merge(df_overview, df_fkg_pivot, left_on=mc_col, right_on='Machine No', how='left')
+            else:
+                master_df = df_overview
         else:
             master_df = df_overview
-    else:
-        master_df = df_overview
+            
+        st.success("✅ تمت معالجة البيانات وتوليد التقرير النهائي بنجاح!")
         
-    return master_df
-
-try:
-    master_report = generate_master_knitting_report()
-    st.success("تم معالجة وتوليد التقرير النهائي بنجاح!")
-    st.dataframe(master_report.head(20))
-    
-    # زر تحميل الملف النهائي
-    output_filename = "Master_Knitting_Report.xlsx"
-    master_report.to_excel(output_filename, index=False)
-    
-    with open(output_filename, "rb") as file:
-        st.download_button(
-            label="تحميل التقرير النهائي (Excel)",
-            data=file,
-            file_name=output_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-except Exception as e:
-    st.error(f"حدث خطأ أثناء التنفيذ: {e}")
+        # عرض عينة من الجدول النهائي
+        st.subheader("📊 عينة من التقرير النهائي المدمج:")
+        st.dataframe(master_df.head(20))
+        
+        # حفظ الملف وتوفير زر التحميل
+        output_filename = "Master_Knitting_Report.xlsx"
+        master_df.to_excel(output_filename, index=False)
+        
+        with open(output_filename, "rb") as file:
+            st.download_button(
+                label="📥 تحميل التقرير النهائي الشامل (Excel)",
+                data=file,
+                file_name=output_filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+    except Exception as e:
+        st.error(f"❌ حدث خطأ أثناء قراءة أو معالجة الملفات: {e}")
+else:
+    st.warning("⚠️ يرجى رفع ملف التراك (Tracking Excel) على الأقل للبدء في العرض والمعالجة.")
