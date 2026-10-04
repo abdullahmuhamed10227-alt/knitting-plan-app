@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الديناميكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
-st.markdown("نظام تخطيط ومتابعة التريكو - استقراء وقراءة البيانات والخانَات من الملفات حرفياً دون أي تعديل.")
+st.markdown("نظام تخطيط ومتابعة التريكو - معالجة البيانات وربط الأوردرات بدقة تامة دون أي فراغات أو عشوائية.")
 
 col1, col2 = st.columns(2)
 
@@ -23,7 +23,10 @@ if uploaded_tracking is not None:
         df_track = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=1)
         df_track = df_track.dropna(how='all')
         
-        # معالجة الخلايا المدمجة للأعمدة الإجمالية
+        # تنظيف وتوحيد اسم عمود أوردر التشغيل في التراك للربط السليم
+        wo_col_track = next((c for c in df_track.columns if 'work order' in str(c).lower() or 'wo' in str(c).lower()), None)
+        
+        # معالجة الخلايا المدمجة للأعمدة الإجمالية في التراك
         merge_columns_to_fill = ['ERP ROLLS', 'Roll / Mc  ERP', 'Unnamed: 21', 'Work ORDER', 'type Qualities', 'CUSTMER']
         for col in merge_columns_to_fill:
             if col in df_track.columns:
@@ -32,51 +35,47 @@ if uploaded_tracking is not None:
         df_track = df_track.fillna("")
         master_df = df_track.copy()
         
-        # 2. قراءة ملف البلان حرفياً بكل خاناته وأعمدته المحددة دون أي تخمين
+        # 2. قراءة ملف البلان وربطه بذكاء حسب رقم الأوردر (Work Order)
         if uploaded_plan is not None:
             st.info(f"📁 جاري قراءة بيانات ملف البلان: {uploaded_plan.name}...")
+            df_plan = pd.DataFrame()
             
             if uploaded_plan.name.endswith('.xlsx'):
-                # في حالة الإكسيل، يتم قراءة الملف والأعمدة المطلوبة حرفياً كما هي تماماً
                 df_plan = pd.read_excel(uploaded_plan)
                 df_plan = df_plan.dropna(how='all').fillna("")
                 
-                # دمج الأعمدة المطلوبة بالاسم حرفياً
+                # توحيد أسماء أعمدة البلان الحرفية المطلوبة
                 required_columns = ['Work Order', 'Seq', 'Acs', 'Item Description', 'Sample Number', 'Ref.Note', 'Pl/Tot.Qty', 'Daily Prd.', 'Yarn Information', 'Customer Name', 'Project Name']
-                
-                # التأكد من جلب الأعمدة الموجودة في ملف البلان حرفياً
                 for col in required_columns:
                     matching_col = next((c for c in df_plan.columns if col.lower().strip() in str(c).lower().strip()), None)
                     if matching_col and matching_col != col:
                         df_plan = df_plan.rename(columns={matching_col: col})
                 
-                master_df = pd.concat([master_df.reset_index(drop=True), df_plan.reset_index(drop=True)], axis=1)
-                st.success("✅ تمت قراءة أعمدة وخانات البلان (Excel) حرفياً ودون أي تعديل!")
+                st.success("✅ تمت قراءة أعمدة وخانات البلان (Excel) بنجاح!")
                 
             elif uploaded_plan.name.endswith('.pdf'):
-                # في حالة الرفع للـ PDF، يتم قراءة السطور واستخراج الحقول بدقة تامة ومنع ظهور أي كلمات عشوائية
                 pdf_reader = pypdf.PdfReader(uploaded_plan)
                 full_text = ""
                 for page in pdf_reader.pages:
                     full_text += page.extract_text() + "\n"
                 
-                chunks = re.split(r'(?=\b\d{6}-\d\b)', full_text)
+                # استخراج الأسطر التي تحتوى على أوردرات صحيحة (مثال: 6 أرقام ثم شرطة ثم رقم)
+                lines = full_text.split('\n')
                 plan_rows = []
                 
-                for chunk in chunks:
-                    wo_match = re.search(r'\b\d{6}-\d\b', chunk)
+                for line in lines:
+                    clean_line = " ".join(line.split())
+                    wo_match = re.search(r'\b\d{6}-\d\b', clean_line)
                     if wo_match:
                         wo_val = wo_match.group()
-                        clean_line = " ".join(chunk.split())
                         
-                        # استخراج دقيق وخالي من أي عشوائية
+                        # استخراج دقيق للحقول من السطر
                         seq_match = re.search(r'^\s*(\d+)', clean_line)
                         seq_val = seq_match.group(1) if seq_match else ""
                         
-                        sample_match = re.search(r'(I-N[A-Za-z0-9\-]+|i-n[A-Za-z0-9\-]+)', clean_line)
+                        sample_match = re.search(r'(I-N[A-Za-z0-9\-]+|i-n[A-Za-z0-9\-]+|Sample[A-Za-z0-9\-]+)', clean_line)
                         sample_no = sample_match.group(1) if sample_match else ""
                         
-                        # فصل الكلمات الأخيرة بدقة لاستخراج العميل والمشروع الحقيقيين بعيداً عن الثوابت النصية
                         words = clean_line.split()
                         customer_val = words[-2] if len(words) >= 2 and not "Project" in words[-2] else ""
                         project_val = words[-1] if len(words) >= 1 and not "Name" in words[-1] else ""
@@ -94,20 +93,40 @@ if uploaded_tracking is not None:
                             "Customer Name": customer_val,
                             "Project Name": project_val
                         })
-                        
+                
                 if plan_rows:
-                    df_pdf_plan = pd.DataFrame(plan_rows)
-                    master_df = pd.concat([master_df.reset_index(drop=True), df_pdf_plan.reset_index(drop=True)], axis=1)
-                    st.success(f"✅ تم استخراج وقراءة محتوى الخانات من الـ PDF بدقة تامة ({len(df_pdf_plan)} سجل)!")
+                    df_plan = pd.DataFrame(plan_rows)
+                    st.success(f"✅ تم استخراج وقراءة محتوى الخانات من الـ PDF بدقة ({len(df_plan)} سجل)!")
                 else:
                     st.warning("⚠️ لم يتم العثور على أوردرات مطابقة للنمط داخل ملف الـ PDF.")
-        
+
+            # 3. خطوة الربط الذكي لتفادي الفراغات والعشوائية
+            if not df_plan.empty:
+                # محاولة إيجاد اسم عمود الأوردر في الملفين للربط الصحيح
+                track_wo_col = next((c for c in master_df.columns if 'work order' in str(c).lower() or 'wo' in str(c).lower() or 'order' in str(c).lower()), None)
+                plan_wo_col = next((c for c in df_plan.columns if 'work order' in str(c).lower() or 'wo' in str(c).lower()), None)
+                
+                if track_wo_col and plan_wo_col:
+                    # تنظيف الأجزاء لتتطابق في الدمج
+                    master_df[track_wo_col] = master_df[track_wo_col].astype(str).str.strip()
+                    df_plan[plan_wo_col] = df_plan[plan_wo_col].astype(str).str.strip()
+                    
+                    # دمج البيانات بناءً على رقم الأوردر لتجنب الفراغات
+                    master_df = pd.merge(master_df, df_plan, left_on=track_wo_col, right_on=plan_wo_col, how='left', suffixes=('', '_plan'))
+                    st.success("🔗 تم دمج ملف البلان مع التراك بناءً على أرقام الأوردرات بدقة تامة!")
+                else:
+                    # دمج تسلسلي آمن إذا تعذر مطابقة الأعمدة حرفياً
+                    master_df = pd.concat([master_df.reset_index(drop=True), df_plan.reset_index(drop=True)], axis=1)
+
+        # تنظيف نهائي للقيم الفارغة لتبدو منظمة
+        master_df = master_df.fillna("")
+
         # عرض التقرير النهائي الشامل
-        st.subheader("📊 التقرير النهائي الشامل (مطابق للملفات الأصلية حرفياً):")
+        st.subheader("📊 التقرير النهائي الشامل (منظم وخالي من الفراغات العشوائية):")
         st.dataframe(master_df, use_container_width=True, height=600)
         
         # زر التحميل
-        output_filename = "Master_Knitting_Report.xlsx"
+        output_filename = "Master_Knitting_Report_Cleaned.xlsx"
         master_df.to_excel(output_filename, index=False)
         
         with open(output_filename, "rb") as file:
