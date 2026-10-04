@@ -7,7 +7,7 @@ st.set_page_config(
     page_title="Master Knitting & Tracking System Pro", page_icon="🧵", layout="wide"
 )
 
-st.title("🧵 النظام الهندسي المتكامل لربط البلان بالتراك (النسخة المصححة والدقيقة)")
+st.title("🧵 النظام الهندسي المتكامل لربط البلان بالتراك (النسخة النهائية المضبوطة)")
 st.write(
     "هذا النظام يرتب الجدول بناءً على خطة الإنتاج (البلان) أولاً، ثم يدمج"
     " القاعدة الشاملة للماكينات من التراك بدقة تامة، مع احترام حالات التشغيل"
@@ -54,7 +54,7 @@ if plan_file is not None and track_file is not None:
             if len(cleaned) >= 2 and cleaned[1]:
               plan_rows.append(cleaned)
 
-    # 📌 2. قراءة ملف التراك الشامل (OVER VIEW) بدون ffill مدمر للحالات
+    # 📌 2. قراءة ملف التراك الشامل (OVER VIEW)
     if track_file.name.endswith(".csv"):
       df_track = pd.read_csv(track_file)
     else:
@@ -66,9 +66,7 @@ if plan_file is not None and track_file is not None:
         if s.strip().upper() == "OVER VIEW":
           sheet_to_use = s
           break
-      df_track = pd.read_excel(
-          track_file, sheet_sheet=sheet_to_use, header=None
-      )
+      df_track = pd.read_excel(track_file, sheet_name=sheet_to_use, header=None)
 
     track_headers = [str(c).strip() for c in df_track.iloc[1].values]
     df_track_data = df_track.iloc[2:].copy()
@@ -113,7 +111,6 @@ if plan_file is not None and track_file is not None:
             else "OFF"
         )
 
-        # التصحيح الهام: إذا كانت الماكينة OFF أو ليس لها أوردر شغل في التراك، يترك الـ Work Order فارغاً تماماً
         is_on = t_onoff.upper() == "ON"
         final_wo = t_wo if (is_on and t_wo and t_wo != "nan") else ""
 
@@ -127,13 +124,12 @@ if plan_file is not None and track_file is not None:
             "Track On/Off": "ON" if is_on else "OFF",
         }
 
-    # 📌 3. بناء الجدول المدمج بحيث نبدأ بترتيب البلان أولاً
+    # 📌 3. بناء الجدول المدمج (ترتيب البلان أولاً ثم باقي الماكينات الشاملة)
     import re
 
     master_rows = []
     processed_machines = set()
 
-    # معالجة ماكينات البلان أولاً لضمان ترتيبها بالأسلوب المتفق عليه
     for p_row in plan_rows:
       p_wo = p_row[1] if len(p_row) > 1 else ""
       p_desc = p_row[3] if len(p_row) > 3 else ""
@@ -147,7 +143,6 @@ if plan_file is not None and track_file is not None:
       )
       m_raw = m_match.group(1) if m_match else ""
 
-      # جلب بيانات التراك لهذه الماكينة إن وجدت
       t_data = track_lookup.get(
           m_clean,
           {
@@ -178,7 +173,6 @@ if plan_file is not None and track_file is not None:
       if m_clean != "UNKNOWN":
         processed_machines.add(m_clean)
 
-    # إضافة باقي ماكينات المصنع (التي لم تورد في البلان أو الواقفة OFF) لتكتمل القاعدة الشاملة
     for m_clean, t_data in track_lookup.items():
       if m_clean not in processed_machines:
         combined = {
@@ -203,7 +197,7 @@ if plan_file is not None and track_file is not None:
     df_master = pd.DataFrame(master_rows)
 
     st.success(
-        f"✅ تم ضبط الترتيب والحالات بنجاح تام! | إجمالي السطور المعروضة:"
+        f"✅ تم معالجة وربط الملفات بنجاح تام! | إجمالي السطور المعروضة:"
         f" **{len(df_master)}** صف"
     )
 
