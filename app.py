@@ -3,26 +3,24 @@ import streamlit as st
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
-st.markdown("قم برفع **ملف التراك (Excel)** وملف **البلان الجديد** يومياً لمعالجة البيانات وتوليد التقرير النهائي.")
+st.markdown("قم برفع **ملف التراك (Excel)** لمعالجة البيانات، ملء الفراغات بدقة، وتوليد التقرير النهائي الشامل.")
 
-# --- قسم رفع الملفات من الواجهة ---
-col1, col2 = st.columns(2)
-
-with col1:
-    uploaded_tracking = st.file_uploader("📂 ارفع ملف التراك الأساسي (Excel)", type=["xlsx"])
-
-with col2:
-    uploaded_plan = st.file_uploader("📂 ارفع ملف البلان الجديد (PDF أو Excel)", type=["xlsx", "pdf"])
+uploaded_tracking = st.file_uploader("📂 ارفع ملف التراك الأساسي (Excel)", type=["xlsx"])
 
 if uploaded_tracking is not None:
     try:
-        st.info("🔄 جاري قراءة ومعالجة الملفات...")
+        st.info("🔄 جاري قراءة ومعالجة الملف وتصحيح الفراغات...")
         
-        # قراءة شيت التتبع الأساسي (OVER VIEW) من ملف التراك المرفق
+        # قراءة الملف الخام لتجاوز مشكلة الخلايا الفارغة في الأوردرات المدمجة
         df_overview = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=1)
         df_overview = df_overview.dropna(how='all')
         
-        # قراءة شيت أوردرات التسلسل (F.K.G) من ملف التراك
+        # ملء الخلايا الفارغة في أعمدة الأوردرات والنوع تلقائياً لتجنب ظهور القيم الفارغة غير المبررة
+        work_order_cols = [col for col in df_overview.columns if 'Work ORDER' in str(col) or 'type' in str(col)]
+        for col in work_order_cols:
+            df_overview[col] = df_overview[col].ffill()
+            
+        # قراءة شيت أوردرات التسلسل (F.K.G)
         try:
             df_fkg = pd.read_excel(uploaded_tracking, sheet_name='F.K.G')
         except Exception:
@@ -48,11 +46,11 @@ if uploaded_tracking is not None:
         else:
             master_df = df_overview
             
-        st.success("✅ تمت معالجة البيانات وتوليد التقرير النهائي بنجاح!")
+        st.success("✅ تمت معالجة البيانات وتصحيح الفراغات وتوليد التقرير النهائي بنجاح!")
         
         # عرض عينة من الجدول النهائي
-        st.subheader("📊 عينة من التقرير النهائي المدمج:")
-        st.dataframe(master_df.head(20))
+        st.subheader("📊 عينة من التقرير النهائي المدمج والمصحح:")
+        st.dataframe(master_df.head(25), use_container_width=True)
         
         # حفظ الملف وتوفير زر التحميل
         output_filename = "Master_Knitting_Report.xlsx"
@@ -67,6 +65,6 @@ if uploaded_tracking is not None:
             )
             
     except Exception as e:
-        st.error(f"❌ حدث خطأ أثناء قراءة أو معالجة الملفات: {e}")
+        st.error(f"❌ حدث خطأ أثناء معالجة الملفات: {e}")
 else:
-    st.warning("⚠️ يرجى رفع ملف التراك (Tracking Excel) على الأقل للبدء في العرض والمعالجة.")
+    st.warning("⚠️ يرجى رفع ملف التراك (Tracking Excel) للبدء في المعالجة.")
