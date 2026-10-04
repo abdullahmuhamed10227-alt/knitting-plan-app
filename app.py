@@ -1,6 +1,9 @@
 import pandas as pd
 import glob
 import os
+import streamlit as st
+
+st.title("نظام تخطيط ومتابعة التريكو الديناميكي")
 
 def generate_master_knitting_report():
     # البحث التلقائي عن ملف التراك في مجلد المشروع بدلاً من استخدام اسم ثابت
@@ -10,9 +13,10 @@ def generate_master_knitting_report():
     if not tracking_files:
         raise FileNotFoundError("لم يتم العثور على ملف التراك (Tracking Excel File) في المجلد!")
     
-    # اختيار أحدث ملف تم رفعه أو أول ملف يتم إيجاده
+    # اختيار الملف المتاح
     tracking_filepath = tracking_files[0]
-    print(جاري استخدام ملف التراك: {tracking_filepath})
+    print(f"جاري استخدام ملف التراك: {tracking_filepath}")
+    st.info(f"جاري استخدام ملف التراك: {tracking_filepath}")
     
     xls = pd.ExcelFile(tracking_filepath)
     
@@ -46,3 +50,22 @@ def generate_master_knitting_report():
         master_df = df_overview
         
     return master_df
+
+try:
+    master_report = generate_master_knitting_report()
+    st.success("تم معالجة وتوليد التقرير النهائي بنجاح!")
+    st.dataframe(master_report.head(20))
+    
+    # زر تحميل الملف النهائي
+    output_filename = "Master_Knitting_Report.xlsx"
+    master_report.to_excel(output_filename, index=False)
+    
+    with open(output_filename, "rb") as file:
+        st.download_button(
+            label="تحميل التقرير النهائي (Excel)",
+            data=file,
+            file_name=output_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+except Exception as e:
+    st.error(f"حدث خطأ أثناء التنفيذ: {e}")
