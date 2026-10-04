@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الديناميكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
-st.markdown("نظام تخطيط ومتابعة التريكو - النسخة المؤمنة والمحدثة ضد أخطاء المعالجة.")
+st.markdown("نظام تخطيط ومتابعة التريكو - الحفاظ على ملف التراك الأصلي وربط البلان بدقة.")
 
 col1, col2 = st.columns(2)
 
@@ -19,23 +19,23 @@ if uploaded_tracking is not None:
     try:
         st.info("🔄 جاري قراءة ملف التراك الأساسي...")
         
-        # 1. قراءة ملف التراك الأساسي
+        # 1. قراءة ملف التراك الأساسي والحفاظ عليه تماماً كما هو
         df_track = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=1)
         df_track = df_track.dropna(how='all')
         
-        # تنظيف الدمج للأعمدة الرئيسية في التراك
+        # تنظيف الدمج للأعمدة الرئيسية في التراك فقط
         merge_columns_to_fill = ['ERP ROLLS', 'Roll / Mc  ERP', 'Unnamed: 21', 'Work ORDER', 'type Qualities', 'CUSTMER']
         for col in merge_columns_to_fill:
             if col in df_track.columns:
                 df_track[col] = df_track[col].ffill()
                 
         df_track = df_track.fillna("")
-        master_df = df_track.copy()
+        master_df = df_track.copy() # ملف التراك الأساسي سليم 100%
         
-        # 2. قراءة ملف البلان
+        # 2. قراءة ملف البلان بمعزل تام
+        df_plan = pd.DataFrame()
         if uploaded_plan is not None:
             st.info(f"📁 جاري معالجة ملف البلان: {uploaded_plan.name}...")
-            df_plan = pd.DataFrame()
             
             if uploaded_plan.name.endswith('.xlsx'):
                 df_plan = pd.read_excel(uploaded_plan)
@@ -46,8 +46,6 @@ if uploaded_tracking is not None:
                     matching_col = next((c for c in df_plan.columns if col.lower().strip() in str(c).lower().strip()), None)
                     if matching_col and matching_col != col:
                         df_plan = df_plan.rename(columns={matching_col: col})
-                
-                st.success("✅ تمت قراءة ملف البلان (Excel) بنجاح!")
                 
             elif uploaded_plan.name.endswith('.pdf'):
                 pdf_reader = pypdf.PdfReader(uploaded_plan)
@@ -63,7 +61,6 @@ if uploaded_tracking is not None:
                     if not clean_line:
                         continue
                         
-                    # البحث عن رقم الأوردر الأساسي (مثال: 6 أرقام - رقم)
                     wo_match = re.search(r'\b\d{6}-\d\b', clean_line)
                     if wo_match:
                         wo_val = wo_match.group()
@@ -88,7 +85,6 @@ if uploaded_tracking is not None:
                                 customer_val = word
                                 break
                         
-                        # معالجة آمنة تماماً بدون أي فصل فارغ
                         if not customer_val and project_val and project_val in clean_line:
                             parts = clean_line.split(project_val)
                             if len(parts) > 0 and parts[0].strip():
@@ -116,11 +112,8 @@ if uploaded_tracking is not None:
                 
                 if plan_rows:
                     df_plan = pd.DataFrame(plan_rows)
-                    st.success(f"✅ تم استخراج وتنظيف بيانات الـ PDF بدقة وسلامة ({len(df_plan)} سجل)!")
-                else:
-                    st.warning("⚠️ لم يتم العثور على أوردرات مطابقة داخل ملف الـ PDF.")
 
-            # 3. الربط الذكي وسحب الأعمدة
+            # 3. إضافه أعمدة البلان بجانب التراك بوضوح وبدون تدمير أعمدة التراك الأصلية
             if not df_plan.empty:
                 track_wo_col = next((c for c in master_df.columns if 'work order' in str(c).lower() or 'wo' in str(c).lower() or 'order' in str(c).lower()), None)
                 plan_wo_col = next((c for c in df_plan.columns if 'work order' in str(c).lower() or 'wo' in str(c).lower()), None)
@@ -129,17 +122,21 @@ if uploaded_tracking is not None:
                     master_df[track_wo_col] = master_df[track_wo_col].astype(str).str.strip()
                     df_plan[plan_wo_col] = df_plan[plan_wo_col].astype(str).str.strip()
                     
-                    master_df = pd.merge(master_df, df_plan, left_on=track_wo_col, right_on=plan_wo_col, how='left', suffixes=('', '_plan'))
-                    st.success("🔗 تم دمج الملفين برقم الأوردر بنجاح تام!")
-                else:
-                    master_df = pd.concat([master_df.reset_index(drop=True), df_plan.reset_index(drop=True)], axis=1)
+                    # إزالة أي أعمدة بلان قديمة لو متكررة لضمان نظافة الجدول
+                    plan_cols_to_use = [c for c in df_plan.columns if c != plan_wo_col]
+                    for c in plan_cols_to_use:
+                        if c in master_df.columns:
+                            master_df = master_df.drop(columns=[c])
+                            
+                    master_df = pd.merge(master_df, df_plan, left_on=track_wo_col, right_on=plan_wo_col, how='left')
+                    st.success("✅ تم الحفاظ على ملف التراك الأصلي وربط بيانات البلان بدقة تامة!")
 
         master_df = master_df.fillna("")
 
-        st.subheader("📊 التقرير النهائي المُصحح:")
+        st.subheader("📊 التقرير النهائي المنظم:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
-        output_filename = "Master_Knitting_Report_Safe.xlsx"
+        output_filename = "Master_Knitting_Report_Clean_Final.xlsx"
         master_df.to_excel(output_filename, index=False)
         
         with open(output_filename, "rb") as file:
