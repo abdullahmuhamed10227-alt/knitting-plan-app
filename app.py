@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الديناميكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الديناميكي")
-st.markdown("نظام إدارة ومتابعة التريكو واستخراج بيانات البلان وتوزيعها داخل الأعمدة المخصصة بدقة تامة.")
+st.markdown("نظام تخطيط ومتابعة التريكو واستخراج وتحليل كافة تفاصيل ملفات البلان بدقة تامة.")
 
 col1, col2 = st.columns(2)
 
@@ -17,7 +17,7 @@ with col2:
 
 if uploaded_tracking is not None:
     try:
-        st.info("🔄 جاري قراءة ملف التراك الأساسي والمعالجة...")
+        st.info("🔄 جاري قراءة ملف التراك الأساسي...")
         
         # 1. قراءة ملف التراك بالكامل
         df_track = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=1)
@@ -32,9 +32,9 @@ if uploaded_tracking is not None:
         df_track = df_track.fillna("")
         master_df = df_track.copy()
         
-        # 2. قراءة وتحليل ملف البلان واستخراج وتعبئة الأعمدة بدقة
+        # 2. قراءة وتحليل ملف البلان واستخراج البيانات داخل الأعمدة بدقة حرفية
         if uploaded_plan is not None:
-            st.info(f"📁 جاري استخراج بيانات البلان وتوزيعها من: {uploaded_plan.name}...")
+            st.info(f"📁 جاري تحليل واستخراج تفاصيل البلان من: {uploaded_plan.name}...")
             
             if uploaded_plan.name.endswith('.xlsx'):
                 df_plan = pd.read_excel(uploaded_plan)
@@ -44,55 +44,70 @@ if uploaded_tracking is not None:
                 
             elif uploaded_plan.name.endswith('.pdf'):
                 pdf_reader = pypdf.PdfReader(uploaded_plan)
+                full_text = ""
+                for page in pdf_reader.pages:
+                    full_text += page.extract_text() + "\n"
+                
+                # تقطيع النص بناءً على أوردرات التشغيل (مثال: 485419-1)
+                chunks = re.split(r'(?=\b\d{6}-\d\b)', full_text)
                 plan_rows = []
                 
-                for page_idx, page in enumerate(pdf_reader.pages):
-                    text = page.extract_text()
-                    lines = text.split('\n')
-                    for line in lines:
-                        wo_match = re.search(r'\b\d{6}-\d\b', line)
-                        if wo_match:
-                            parts = line.split()
-                            wo_val = wo_match.group()
-                            
-                            # استخراج دقيق للعناصر
-                            seq_val = parts[0] if parts and parts[0].isdigit() else ""
-                            acs_val = parts[2] if len(parts) > 2 else ""
-                            
-                            # استخراج رقم العينة (الذي يبدأ بـ I-N أو مشابه)
-                            sample_no = next((p for p in parts if 'I-N' in p or 'i-n' in p), "")
-                            
-                            # استخراج اسم العميل واسم المشروع من نهايات السطر النصي بدقة
-                            non_numeric_parts = [p for p in parts if not re.match(r'^\d+([./]\d+)?$', p) and p != wo_val]
-                            customer_name = non_numeric_parts[-2] if len(non_numeric_parts) >= 2 else (parts[-2] if len(parts) >= 2 else "")
-                            project_name = non_numeric_parts[-1] if len(non_numeric_parts) >= 1 else (parts[-1] if len(parts) >= 1 else "")
-                            
-                            plan_rows.append({
-                                "Work Order": wo_val,
-                                "Seq": seq_val,
-                                "Acs": acs_val,
-                                "Item Description": line,
-                                "Sample Number": sample_no,
-                                "Ref.Note": "",
-                                "Pl/Tot.Qty": "",
-                                "Daily Prd.": "",
-                                "Yarn Information": "",
-                                "Customer Name": customer_name,
-                                "Project Name": project_name
-                            })
-                            
+                for chunk in chunks:
+                    wo_match = re.search(r'\b\d{6}-\d\b', chunk)
+                    if wo_match:
+                        wo_val = wo_match.group()
+                        
+                        # استخراج التسلسل (Seq) الذي يسبق رقم الأوردر غالباً
+                        seq_match = re.search(r'(\d+)\s+' + wo_val, chunk)
+                        seq_val = seq_match.group(1) if seq_match else ""
+                        
+                        # استخراج رقم العينة (Sample No) الذي يبدأ بـ I-N أو i-n
+                        sample_match = re.search(r'(I-N[A-Za-z0-9\-]+|i-n[A-Za-z0-9\-]+)', chunk)
+                        sample_no = sample_match.group(1) if sample_match else ""
+                        
+                        # استخراج معلومات الخيوط والغزل (Yarn Information)
+                        yarn_match = re.search(r'(Ne\s+\d+/\d+[^|\n]+|OPENEND[^|\n]+|PENYE[^|\n]+)', chunk, re.IGNORECASE)
+                        yarn_info = yarn_match.group(1).strip() if yarn_match else ""
+                        
+                        # استخراج اسم العميل والمشروع من نهاية النص الخاص بالأوردر
+                        lines_in_chunk = [l.strip() for l in chunk.split('\n') if l.strip()]
+                        customer_name = ""
+                        project_name = ""
+                        if lines_in_chunk:
+                            last_line = lines_in_chunk[-1]
+                            tokens = last_line.split()
+                            if len(tokens) >= 2:
+                                customer_name = tokens[-2]
+                                project_name = tokens[-1]
+                            elif len(tokens) == 1:
+                                customer_name = tokens[0]
+
+                        plan_rows.append({
+                            "Work Order": wo_val,
+                            "Seq": seq_val,
+                            "Acs": "M" if " M " in chunk or chunk.endswith(" M") else "",
+                            "Item Description": lines_in_chunk[0] if lines_in_chunk else "",
+                            "Sample Number": sample_no,
+                            "Ref.Note": "",
+                            "Pl/Tot.Qty": "",
+                            "Daily Prd.": "",
+                            "Yarn Information": yarn_info,
+                            "Customer Name": customer_name,
+                            "Project Name": project_name
+                        })
+                        
                 if plan_rows:
                     df_pdf_plan = pd.DataFrame(plan_rows)
                     master_df = pd.concat([master_df.reset_index(drop=True), df_pdf_plan.reset_index(drop=True)], axis=1)
-                    st.success(f"✅ تم استخراج وتعبئة تفاصيل البلان داخل الأعمدة بنجاح ({len(df_pdf_plan)} سجل)!")
+                    st.success(f"✅ تم استخراج وتعبئة تفاصيل البلان بدقة تامة داخل الأعمدة ({len(df_pdf_plan)} أوردر مستخرج)!")
                 else:
                     st.warning("⚠️ لم يتم العثور على أوردرات مطابقة للنمط داخل ملف الـ PDF.")
         
         # عرض التقرير النهائي الشامل
-        st.subheader("📊 التقرير النهائي الشامل بعد توزيع بيانات البلان بدقة:")
+        st.subheader("📊 التقرير النهائي الشامل بعد تحليل وتوزيع بيانات البلان:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
-        # زر التحميل
+        # زر التحميل المباشر
         output_filename = "Master_Knitting_Report.xlsx"
         master_df.to_excel(output_filename, index=False)
         
