@@ -5,10 +5,8 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الذكي", layout="wide")
-st.title("🧵 نظام تخطيط ومتابعة التريكو - التقرير المستقل والمطابق للنموذج القياسي")
-st.markdown("عرض ملف التراك منسقاً وملوناً، وبجواره ملف البلان مرتباً بالترتيب النموذجي الدقيق للاعمدة وبدون أي تداخل.")
-
-col1, col2 = s.columns(2) if 's' in globals() else st.columns(2) # Fallback
+st.title("🧵 نظام تخطيط ومتابعة التريكو - التقرير المستقل والمنظم")
+st.markdown("عرض ملف التراك منسقاً وملوناً، وبجواره ملف البلان مرتباً بالترتيب النموذجي الدقيق بدون أي تداخل أو تكرار في الأسماء.")
 
 col1, col2 = st.columns(2)
 
@@ -41,6 +39,9 @@ if uploaded_tracking is not None and uploaded_plan is not None:
                 
         df_track = df_track.fillna("")
         
+        # تمييز أعمدة التراك لمنع أي تعارض في الأسماء
+        df_track = df_track.rename(columns=lambda c: f"{str(c).strip()}_Tracking" if c != '--- TRACKING ---' else c)
+        
         # 2. قراءة ومعالجة ملف البلان وترتيب أعمدته بالترتيب النموذجي المطلوب
         df_plan = pd.DataFrame()
         if uploaded_plan.name.endswith('.xlsx'):
@@ -55,7 +56,6 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             df_plan = pd.read_excel(uploaded_plan, header=header_plan_idx)
             df_plan = df_plan.dropna(how='all').fillna("")
             
-            # إعادة تسمية الأعمدة وتوحيدها مطابقة للنموذج القياسي
             rename_map = {}
             for col in df_plan.columns:
                 c_str = str(col).strip().lower()
@@ -86,38 +86,35 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             
             df_plan = df_plan.rename(columns=rename_map)
             
-            # التأكد من وجود الأعمدة الأساسية بالترتيب المطلوب تماماً
             standard_plan_cols = [
                 'Work Order', 'Machine', 'Seq.', 'Gauge_Specs', 'Item Description', 
                 'Sample Number', 'Ref.Note', 'Pl/Tot.Qty', 'Dailiy Prd.', 
                 'Yarn Information', 'Customer Name', 'Project Name'
             ]
             
-            # إضافة أي أعمدة ناقصة فارغة لضمان ثبات الهيكل القياسي
             for std_col in standard_plan_cols:
                 if std_col not in df_plan.columns:
                     df_plan[std_col] = ""
                     
-            # ترتيب الأعمدة بالترتيب الاحترافي المطلوب حرفياً
             df_plan = df_plan[standard_plan_cols]
             
-            # ملء خلايا الماكينات المدمجة عمودياً لتظهر مرتبة
             if 'Machine' in df_plan.columns:
                 df_plan['Machine'] = df_plan['Machine'].replace('', pd.NA).ffill()
                 
             df_plan = df_plan.drop_duplicates()
 
         df_plan = df_plan.fillna("")
+        
+        # تمييز أعمدة البلان لمنع أي تعارض في الأسماء
+        df_plan = df_plan.rename(columns=lambda c: f"{str(c).strip()}_Plan" if c != '--- PLAN ---' else c)
 
-        # 3. عرض الجدولين جنباً إلى جنب ككتلتين مستقلتين تماماً في ملف إكسيل واحد
-        max_rows = max(len(df_track), len(df_plan))
+        # 3. عرض الجدولين جنباً إلى جنب ككتلتين مستقلتين تماماً
         df_track_reset = df_track.reset_index(drop=True)
         df_plan_reset = df_plan.reset_index(drop=True)
         
         df_track_reset['--- TRACKING (الموقف الفعلي) ---'] = ""
         df_plan_reset['--- PLAN (خطة التشغيل) ---'] = ""
         
-        # الدمج الأفقي المستقل
         master_df = pd.concat([df_track_reset, df_plan_reset], axis=1)
         master_df = master_df.fillna("")
 
@@ -150,7 +147,7 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             col_name = str(ws.cell(row=1, column=col_num).value).strip().lower()
             if 'on / off' in col_name or 'on/off' in col_name:
                 on_off_col_idx = col_num
-            if 'machine' in col_name or 'mc' in col_name or 'machine no' in col_name:
+            if ('machine' in col_name or 'mc' in col_name) and '_tracking' in col_name:
                 if not mc_col_idx:
                     mc_col_idx = col_num
 
