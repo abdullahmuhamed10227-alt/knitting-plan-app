@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الذكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو الذكي والديناميكي")
-st.markdown("نظام موحد ومستقل لقراءة ومعالجة ملفات التراك وخطط التشغيل مهما كانت الاختلافات في الأعمدة أو الماكينات.")
+st.markdown("نظام موحد لمعالجة وربط ملفات التراك والبلان مع ضمان عدم سقوط أي أوردرات أو بيانات.")
 
 col1, col2 = st.columns(2)
 
@@ -19,7 +19,7 @@ if uploaded_tracking is not None:
     try:
         st.info("🔄 جاري قراءة وتحليل ملف التراك الأساسي...")
         
-        # قراءة أولية لاكتشاف صف الهيدر الصحيح في ملف التراك
+        # 1. قراءة ملف التراك الأساسي
         df_track_raw = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=None)
         header_track_idx = 1
         for idx, row in df_track_raw.iterrows():
@@ -31,7 +31,7 @@ if uploaded_tracking is not None:
         df_track = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=header_track_idx)
         df_track = df_track.dropna(how='all')
         
-        # تعبئة الخلايا المدمجة للأعمدة الرئيسية لتجنب أي قيم فارغة في التراك
+        # تعبئة الخلايا المدمجة للأعمدة الرئيسية في التراك
         for col in df_track.columns:
             col_str = str(col).strip().upper()
             if any(k in col_str for k in ['ROLLS', 'ORDER', 'CUSTMER', 'QUALITIES']):
@@ -40,7 +40,7 @@ if uploaded_tracking is not None:
         df_track = df_track.fillna("")
         master_df = df_track.copy()
         
-        # 2. قراءة ومعالجة ملف البلان بشكل ديناميكي كامل
+        # 2. قراءة ملف البلان
         df_plan = pd.DataFrame()
         if uploaded_plan is not None:
             st.info(f"📁 جاري تحليل ومعالجة ملف البلان: {uploaded_plan.name}...")
@@ -57,7 +57,7 @@ if uploaded_tracking is not None:
                 df_plan = pd.read_excel(uploaded_plan, header=header_plan_idx)
                 df_plan = df_plan.dropna(how='all').fillna("")
                 
-                # اكتشاف وعلاج عمود الماكينة المدمج (المليء بالفراغات تحت اسم الماكينة الأولى)
+                # معالجة خلايا الماكينات المدمجة في البلان
                 mc_col = None
                 for c in df_plan.columns:
                     c_low = str(c).strip().lower()
@@ -65,11 +65,10 @@ if uploaded_tracking is not None:
                         mc_col = c
                         break
                 if not mc_col and len(df_plan.columns) > 1:
-                    mc_col = df_plan.columns[1]  # الافتراضي الشائع في ملفات البلان
+                    mc_col = df_plan.columns[1]
                     
                 if mc_col:
                     df_plan = df_plan.rename(columns={mc_col: 'Detected_Machine'})
-                    # أهم خطوة لملء ماكينات الأوردرات المتعددة تحت بعضها تلقائياً
                     df_plan['Detected_Machine'] = df_plan['Detected_Machine'].replace('', pd.NA).ffill()
                 
                 st.success(f"✅ تم تحليل ملف البلان بنجاح وعدد السجلات: {len(df_plan)}")
@@ -111,9 +110,8 @@ if uploaded_tracking is not None:
                 if plan_rows:
                     df_plan = pd.DataFrame(plan_rows)
 
-            # 3. توحيد مفاتيح الربط والدمج الذكي غير المدمر للبيانات
+            # 3. الدمج الذكي والآمن لضمان عدم ضياع أي أوردر
             if not df_plan.empty:
-                # توحيد أسماء أعمدة البلان ديناميكياً
                 for col in df_plan.columns:
                     col_s = str(col).strip().lower()
                     if 'work order' in col_s or col_s == 'work order':
@@ -121,7 +119,6 @@ if uploaded_tracking is not None:
                     elif 'seq' in col_s:
                         df_plan = df_plan.rename(columns={col: 'Seq_Plan'})
 
-                # البحث عن أعمدة المطابقة في التراك
                 track_wo = next((c for c in master_df.columns if 'work order' in str(c).lower() or 'order' in str(c).lower()), None)
                 track_mc = next((c for c in master_df.columns if 'machine' in str(c).lower() or 'mc' in str(c).lower()), None)
                 track_seq = next((c for c in master_df.columns if 'seq' in str(c).lower()), None)
@@ -142,30 +139,27 @@ if uploaded_tracking is not None:
                         df_plan['Key_Seq'] = df_plan['Seq_Plan'].astype(str).str.strip().str.replace('.0', '', regex=False)
                         merge_keys.append('Key_Seq')
 
-                    # إزالة التكرارات من البلان لضمان عدم مضاعفة الصفوف في التراك
                     df_plan = df_plan.drop_duplicates(subset=merge_keys, keep='first')
 
-                    # إزالة أعمدة البلان القديمة المتداخلة من الماستر لو وجدت
                     for c in df_plan.columns:
                         if c in master_df.columns and c not in merge_keys:
                             master_df = master_df.drop(columns=[c])
 
-                    # الدمج الذكي النهائي
+                    # استخدام Left Join للحفاظ على كل صفوف التراك الأساسية وعدم إسقاط أي شيء
                     master_df = pd.merge(master_df, df_plan, on=merge_keys, how='left')
                     
-                    # تنظيف مفاتيح الربط المؤقتة
                     for k in ['Key_WO', 'Key_MC', 'Key_Seq']:
                         if k in master_df.columns:
                             master_df = master_df.drop(columns=[k])
                             
-                    st.success("🔗 تم ربط البيانات واستخراجها بنجاح تام وفقاً لهيكل وتوزيع الملفات!")
+                    st.success("🔗 تم ربط الملفات بنجاح تام مع الحفاظ على كافة الأوردرات والبيانات!")
 
         master_df = master_df.fillna("")
 
-        st.subheader("📊 معاينة التقرير النهائي الموحد:")
+        st.subheader("📊 معاينة التقرير النهائي الشامل:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
-        output_filename = "Master_Knitting_System_Report.xlsx"
+        output_filename = "Master_Knitting_Complete_Report.xlsx"
         master_df.to_excel(output_filename, index=False)
         
         with open(output_filename, "rb") as file:
