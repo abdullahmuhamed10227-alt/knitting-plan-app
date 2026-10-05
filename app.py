@@ -6,7 +6,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الذكي", layout="wide")
 st.title("🧵 نظام تخطيط ومتابعة التريكو - تفصيل الأوردرات والماكينات")
-st.markdown("عرض التراك وبجوار جدول البلان بحيث يظهر كل Work Order مدمج وأمامه صفوف منفصلة لكل ماكينة بتفاصيلها الكاملة.")
+st.markdown("عرض التراك بجوار جدول البلان بحيث يظهر كل Work Order مدمج وأمامه صفوف منفصلة لكل ماكينة بتفاصيلها الكاملة.")
 
 col1, col2 = st.columns(2)
 
@@ -74,7 +74,7 @@ if uploaded_tracking is not None:
                 if plan_wo_col:
                     df_plan = df_plan.rename(columns={plan_wo_col: 'Work_Order_Plan'})
 
-                st.success(과f"✅ تم معالجة ملف البلان وفرد تفاصيل الماكينات بنجاح ({len(df_plan)} صف)!")
+                st.success(f"✅ تم معالجة ملف البلان وفرد تفاصيل الماكينات بنجاح ({len(df_plan)} صف)!")
 
         # 3. الدمج الشامل بين التراك والبلان المفصل
         if not df_plan.empty:
