@@ -5,8 +5,10 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الذكي", layout="wide")
-st.title("🧵 نظام تخطيط ومتابعة التريكو - النسخة النهائية المطورة")
-st.markdown("دمج ملف التراك مع البلان بالربط الثلاثي (أوردر + ماكينة + سيكوانس) لمنع أي تكرار نهائياً.")
+st.title("🧵 نظام تخطيط ومتابعة التريكو - التقرير المستقل والمطابق للنموذج القياسي")
+st.markdown("عرض ملف التراك منسقاً وملوناً، وبجواره ملف البلان مرتباً بالترتيب النموذجي الدقيق للاعمدة وبدون أي تداخل.")
+
+col1, col2 = s.columns(2) if 's' in globals() else st.columns(2) # Fallback
 
 col1, col2 = st.columns(2)
 
@@ -16,11 +18,11 @@ with col1:
 with col2:
     uploaded_plan = st.file_uploader("📂 ارفع ملف البلان الجديد (Excel أو PDF)", type=["xlsx", "pdf"])
 
-if uploaded_tracking is not None:
+if uploaded_tracking is not None and uploaded_plan is not None:
     try:
-        st.info("🔄 جاري قراءة ملف التراك الأساسي...")
+        st.info("🔄 جاري معالجة ملفات التراك والبلان باستقلالية تامة...")
         
-        # 1. قراءة ملف التراك الأساسي بكامل أعمدته وهيكله
+        # 1. قراءة ومعالجة ملف التراك الأساسي
         df_track_raw = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=None)
         header_track_idx = 1
         for idx, row in df_track_raw.iterrows():
@@ -39,85 +41,91 @@ if uploaded_tracking is not None:
                 
         df_track = df_track.fillna("")
         
-        # 2. قراءة ملف البلان وتجهيز مفاتيح الربط الدقيقة
+        # 2. قراءة ومعالجة ملف البلان وترتيب أعمدته بالترتيب النموذجي المطلوب
         df_plan = pd.DataFrame()
-        if uploaded_plan is not None:
-            st.info(f"📁 جاري قراءة ملف البلان: {uploaded_plan.name}...")
+        if uploaded_plan.name.endswith('.xlsx'):
+            df_plan_raw = pd.read_excel(uploaded_plan, header=None)
+            header_plan_idx = 0
+            for idx, row in df_plan_raw.iterrows():
+                row_str = str(row.values).lower()
+                if 'work order' in row_str or 'machine' in row_str:
+                    header_plan_idx = idx
+                    break
             
-            if uploaded_plan.name.endswith('.xlsx'):
-                df_plan_raw = pd.read_excel(uploaded_plan, header=None)
-                header_plan_idx = 0
-                for idx, row in df_plan_raw.iterrows():
-                    row_str = str(row.values).lower()
-                    if 'work order' in row_str or 'machine' in row_str:
-                        header_plan_idx = idx
-                        break
-                
-                df_plan = pd.read_excel(uploaded_plan, header=header_plan_idx)
-                df_plan = df_plan.dropna(how='all').fillna("")
-                
-                # معالجة خلايا الماكينات المدمجة عمودياً في البلان
-                mc_col = None
-                for c in df_plan.columns:
-                    c_low = str(c).strip().lower()
-                    if 'machine' in c_low or 'mc' in c_low or c_low == '1' or 'unnamed: 1' in c_low:
-                        mc_col = c
-                        break
-                if not mc_col and len(df_plan.columns) > 1:
-                    mc_col = df_plan.columns[1]
+            df_plan = pd.read_excel(uploaded_plan, header=header_plan_idx)
+            df_plan = df_plan.dropna(how='all').fillna("")
+            
+            # إعادة تسمية الأعمدة وتوحيدها مطابقة للنموذج القياسي
+            rename_map = {}
+            for col in df_plan.columns:
+                c_str = str(col).strip().lower()
+                if 'work order' in c_str:
+                    rename_map[col] = 'Work Order'
+                elif 'machine' in c_str or c_str == '1' or 'unnamed: 1' in c_str:
+                    rename_map[col] = 'Machine'
+                elif 'seq' in c_str:
+                    rename_map[col] = 'Seq.'
+                elif 'gauge' in c_str or 'specs' in c_str:
+                    rename_map[col] = 'Gauge_Specs'
+                elif 'item' in c_str:
+                    rename_map[col] = 'Item Description'
+                elif 'sample' in c_str:
+                    rename_map[col] = 'Sample Number'
+                elif 'ref' in c_str:
+                    rename_map[col] = 'Ref.Note'
+                elif 'qty' in c_str or 'tot' in c_str:
+                    rename_map[col] = 'Pl/Tot.Qty'
+                elif 'daily' in c_str or 'prd' in c_str:
+                    rename_map[col] = 'Dailiy Prd.'
+                elif 'yarn' in c_str:
+                    rename_map[col] = 'Yarn Information'
+                elif 'customer' in c_str:
+                    rename_map[col] = 'Customer Name'
+                elif 'project' in c_str:
+                    rename_map[col] = 'Project Name'
+            
+            df_plan = df_plan.rename(columns=rename_map)
+            
+            # التأكد من وجود الأعمدة الأساسية بالترتيب المطلوب تماماً
+            standard_plan_cols = [
+                'Work Order', 'Machine', 'Seq.', 'Gauge_Specs', 'Item Description', 
+                'Sample Number', 'Ref.Note', 'Pl/Tot.Qty', 'Dailiy Prd.', 
+                'Yarn Information', 'Customer Name', 'Project Name'
+            ]
+            
+            # إضافة أي أعمدة ناقصة فارغة لضمان ثبات الهيكل القياسي
+            for std_col in standard_plan_cols:
+                if std_col not in df_plan.columns:
+                    df_plan[std_col] = ""
                     
-                if mc_col:
-                    df_plan = df_plan.rename(columns={mc_col: 'Machine_Plan'})
-                    df_plan['Machine_Plan'] = df_plan['Machine_Plan'].replace('', pd.NA).ffill()
-                
-                # توحيد أسماء الأعمدة الأساسية في البلان
-                for col in df_plan.columns:
-                    col_str = str(col).strip().lower()
-                    if 'work order' in col_str:
-                        df_plan = df_plan.rename(columns={col: 'Work_Order_Plan'})
-                    elif 'machine' in col_str:
-                        df_plan = df_plan.rename(columns={col: 'Machine_Plan'})
-                    elif 'seq' in col_str:
-                        df_plan = df_plan.rename(columns={col: 'Seq_Plan'})
-
-                # منع تكرار نفس الصفوف داخل البلان نفسه قبل الدمج
-                df_plan = df_plan.drop_duplicates()
-                st.success(f"✅ تم قراءة ملف البلان وتجهيزه بدقة ({len(df_plan)} صف)!")
-
-        # 3. الربط الدقيق بمنع التكرار (الربط المزدوج: رقم الأوردر + رقم الماكينة)
-        if not df_plan.empty:
-            track_wo = next((c for c in df_track.columns if 'work order' in str(c).lower() or 'order' in str(c).lower()), None)
-            track_mc = next((c for c in df_track.columns if 'machine' in str(c).lower() or 'mc' in str(c).lower()), None)
+            # ترتيب الأعمدة بالترتيب الاحترافي المطلوب حرفياً
+            df_plan = df_plan[standard_plan_cols]
             
-            if track_wo and 'Work_Order_Plan' in df_plan.columns:
-                df_track['Key_WO'] = df_track[track_wo].astype(str).str.strip().str.upper()
-                df_plan['Key_WO'] = df_plan['Work_Order_Plan'].astype(str).str.strip().str.upper()
+            # ملء خلايا الماكينات المدمجة عمودياً لتظهر مرتبة
+            if 'Machine' in df_plan.columns:
+                df_plan['Machine'] = df_plan['Machine'].replace('', pd.NA).ffill()
                 
-                merge_keys = ['Key_WO']
-                
-                if track_mc and 'Machine_Plan' in df_plan.columns:
-                    df_track['Key_MC'] = df_track[track_mc].astype(str).str.strip().str.upper().str.replace('M', '', regex=True)
-                    df_plan['Key_MC'] = df_plan['Machine_Plan'].astype(str).str.strip().str.upper().str.replace('M', '', regex=True)
-                    merge_keys.append('Key_MC')
+            df_plan = df_plan.drop_duplicates()
 
-                # الدمج الدقيق بمنع تضاعف الصفوف
-                master_df = pd.merge(df_track, df_plan, on=merge_keys, how='left', suffixes=('_Tracking', '_Plan'))
-                
-                for k in merge_keys:
-                    if k in master_df.columns:
-                        master_df = master_df.drop(columns=[k])
-            else:
-                master_df = pd.concat([df_track.reset_index(drop=True), df_plan.reset_index(drop=True)], axis=1)
-        else:
-            master_df = df_track
+        df_plan = df_plan.fillna("")
 
+        # 3. عرض الجدولين جنباً إلى جنب ككتلتين مستقلتين تماماً في ملف إكسيل واحد
+        max_rows = max(len(df_track), len(df_plan))
+        df_track_reset = df_track.reset_index(drop=True)
+        df_plan_reset = df_plan.reset_index(drop=True)
+        
+        df_track_reset['--- TRACKING (الموقف الفعلي) ---'] = ""
+        df_plan_reset['--- PLAN (خطة التشغيل) ---'] = ""
+        
+        # الدمج الأفقي المستقل
+        master_df = pd.concat([df_track_reset, df_plan_reset], axis=1)
         master_df = master_df.fillna("")
 
-        st.subheader("📊 معاينة التقرير الموحد الخالي من التكرار:")
+        st.subheader("📊 معاينة التقرير المستقل بالترتيب القياسي:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
         # 4. تصدير وتنسيق ملف الإكسيل الاحترافي
-        output_filename = "Master_Clean_Knitting_Report.xlsx"
+        output_filename = "Master_Standard_Knitting_Report.xlsx"
         
         with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
             master_df.to_excel(writer, index=False, sheet_name='Master Report')
@@ -135,7 +143,7 @@ if uploaded_tracking is not None:
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             
-        # البحث عن أعمدة الحالة والماكينة في التراك لتلوين ON / OFF
+        # تلوين حالات ON (أخضر) و OFF (أحمر) في جزء التراك فقط
         on_off_col_idx = None
         mc_col_idx = None
         for col_num in range(1, ws.max_column + 1):
@@ -152,7 +160,6 @@ if uploaded_tracking is not None:
         red_fill = PatternFill(start_color="F4CCCC", end_color="F4CCCC", fill_type="solid")
         red_font = Font(name="Calibri", size=10, bold=True, color="660000")
 
-        # تطبيق التنسيق والالتفاف (Wrap Text) وتلوين التراك
         for row_num in range(2, ws.max_row + 1):
             status_val = ""
             if on_off_col_idx:
@@ -186,14 +193,14 @@ if uploaded_tracking is not None:
 
         with open(output_filename, "rb") as file:
             st.download_button(
-                label="📥 تحميل التقرير النهائي المنظم (Excel)",
+                label="📥 تحميل التقرير القياسي النهائي (Excel)",
                 data=file,
                 file_name=output_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("✅ تم إصدار التقرير النهائي بدون أي تكرار وبكل دقة!")
+            st.success("✅ تم إصدار التقرير بالترتيب القياسي الدقيق وبفصل تام بين التراك والبلان!")
             
     except Exception as e:
         st.error(f"❌ حدث خطأ أثناء المعالجة: {e}")
 else:
-    st.warning("⚠️ يرجى رفع ملف التراك الأساسي وملف البلان للبدء.")
+    st.info("ℹ️ يرجى رفع ملف التراك وملف البلان للبدء.")
