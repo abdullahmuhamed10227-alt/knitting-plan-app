@@ -1,10 +1,13 @@
 import pandas as pd
 import streamlit as st
 import pypdf
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from io import BytesIO
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الذكي", layout="wide")
-st.title("🧵 نظام تخطيط ومتابعة التريكو - التقرير الشامل الموحد")
-st.markdown("عرض ملف التراك الأساسي بجوار ملف البلان كاملاً بكل أعمدته ومعلوماته دون أي نقصان أو تعديل.")
+st.title("🧵 نظام تخطيط ومتابعة التريكو - التقرير الشامل والممنّسق")
+st.markdown("عرض ملف التراك الأساسي بجوار ملف البلان مع التنسيق التلقائي، تفعيل Wrap Text، وتلوين حالات الماكينات (ON/OFF).")
 
 col1, col2 = st.columns(2)
 
@@ -30,7 +33,7 @@ if uploaded_tracking is not None:
         df_track = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=header_track_idx)
         df_track = df_track.dropna(how='all')
         
-        # تنظيف الدمج للأعمدة الرئيسية في التراك لضمان وضوح الموقف الفعلي
+        # تنظيف الدمج للأعمدة الرئيسية في التراك
         for col in df_track.columns:
             col_str = str(col).strip().upper()
             if any(k in col_str for k in ['ROLLS', 'ORDER', 'CUSTMER', 'QUALITIES']):
@@ -38,7 +41,7 @@ if uploaded_tracking is not None:
                 
         df_track = df_track.fillna("")
         
-        # 2. قراءة ملف البلان بكامل محتواه دون حذف أي عمود أو معلومة
+        # 2. قراءة ملف البلان بكامل محتواه دون حذف أي عمود
         df_plan = pd.DataFrame()
         if uploaded_plan is not None:
             st.info(f"📁 جاري قراءة ملف البلان بكامل تفاصيله: {uploaded_plan.name}...")
@@ -52,11 +55,10 @@ if uploaded_tracking is not None:
                         header_plan_idx = idx
                         break
                 
-                # قراءة ملف البلان كما هو تماماً (كامل الأعمدة)
                 df_plan = pd.read_excel(uploaded_plan, header=header_plan_idx)
                 df_plan = df_plan.dropna(how='all').fillna("")
                 
-                # معالجة خلايا الماكينات المدمجة في البلان لملء الفراغات عمودياً لتظهر بجانب كل سطر
+                # معالجة خلايا الماكينات المدمجة في البلان لملء الفراغات عمودياً
                 mc_col = None
                 for c in df_plan.columns:
                     c_low = str(c).strip().lower()
@@ -69,22 +71,19 @@ if uploaded_tracking is not None:
                 if mc_col:
                     df_plan[mc_col] = df_plan[mc_col].replace('', pd.NA).ffill()
                 
-                st.success(f"✅ تم تحميل ملف البلان كاملاً ({len(df_plan)} صف) وإضافته بجوار التراك!")
+                st.success(f"✅ تم تحميل ملف البلان كاملاً ({len(df_plan)} صف)!")
                 
             elif uploaded_plan.name.endswith('.pdf'):
                 pdf_reader = pypdf.PdfReader(uploaded_plan)
                 full_text = ""
                 for page in pdf_reader.pages:
                     full_text += page.extract_text() + "\n"
-                
-                # قراءة نصية دقيقة للـ PDF
                 from io import StringIO
-                df_plan = pd.read_fwf(StringIO(full_text)) # احتياطي لو ملف نصي أو استخراج سطور
+                df_plan = pd.read_fwf(StringIO(full_text))
                 df_plan = df_plan.fillna("")
 
-        # 3. إلحاق ملف البلان بجوار ملف التراك (دمج أفقي ذكي Full Outer Join يضمن عدم ضياع أي صف من الملفين)
+        # 3. إلحاق ملف البلان بجوار ملف التراك (دمج أفقي ذكي Full Outer Join)
         if not df_plan.empty:
-            # توحيد أعمدة المفاتيح للربط (رقم الأوردر والماكينة والسيكوانس)
             track_wo = next((c for c in df_track.columns if 'work order' in str(c).lower() or 'order' in str(c).lower()), None)
             plan_wo = next((c for c in df_plan.columns if 'work order' in str(c).lower() or 'order' in str(c).lower()), None)
             
@@ -101,33 +100,98 @@ if uploaded_tracking is not None:
                     df_plan['Key_MC'] = df_plan[plan_mc].astype(str).str.strip().str.upper().str.replace('M', '', regex=True)
                     merge_keys.append('Key_MC')
 
-                # استخدام Full Outer Join لضمان ظهور كل بيانات التراك وكل بيانات البلان بالكامل (بدون حذف أي شيء)
                 master_df = pd.merge(df_track, df_plan, on=merge_keys, how='outer', suffixes=('_Tracking', '_Plan'))
                 
                 for k in ['Key_WO', 'Key_MC']:
                     if k in master_df.columns:
                         master_df = master_df.drop(columns=[k])
             else:
-                # لو تعذر الربط، يتم وضع الملفين بجانب بعضهما تسلسلياً لضمان عدم ضياع البيانات
                 master_df = pd.concat([df_track.reset_index(drop=True), df_plan.reset_index(drop=True)], axis=1)
         else:
             master_df = df_track
 
         master_df = master_df.fillna("")
 
-        st.subheader("📊 معاينة التقرير الشامل (التراك + البلان بكامل التفاصيل):")
+        st.subheader("📊 معاينة التقرير الشامل والممنّسق:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
-        output_filename = "Master_Full_Knitting_Report.xlsx"
-        master_df.to_excel(output_filename, index=False)
+        # 4. تنسيق وهندسة ملف الإكسيل المصدر (تلوين ON/OFF، عريض الهيدر، Wrap Text، واحتواء الأعمدة)
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            master_df.to_excel(writer, index=False, sheet_name='Master Report')
+            
+        output.seek(0)
+        wb = openpyxl.load_workbook(output)
+        ws = wb.active
         
-        with open(output_filename, "rb") as file:
-            st.download_button(
-                label="📥 تحميل التقرير الشامل النهائي (Excel)",
-                data=file,
-                file_name=output_filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        # تنسيق الهيدر (العناوين العلوية)
+        header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid") # أزرق غامق احترافي
+        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        
+        for col_num in range(1, ws.max_column + 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            
+        # البحث عن عمود حالة الماكينة (ON/OFF) وعمود رقم الماكينة في جزء التراك لتلوينهم
+        on_off_col_idx = None
+        mc_col_idx = None
+        for col_num in range(1, ws.max_column + 1):
+            col_name = str(ws.cell(row=1, column=col_num).value).strip().lower()
+            if 'on / off' in col_name or 'on/off' in col_name:
+                on_off_col_idx = col_num
+            if 'machine' in col_name or 'mc' in col_name or 'machine no' in col_name:
+                if not mc_col_idx:
+                    mc_col_idx = col_num
+
+        green_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid") # أخضر فاتح
+        green_font = Font(name="Calibri", size=10, bold=True, color="274E13")
+        
+        red_fill = PatternFill(start_color="F4CCCC", end_color="F4CCCC", fill_type="solid") # أحمر فاتح
+        red_font = Font(name="Calibri", size=10, bold=True, color="660000")
+
+        # تطبيق التنسيق على الصفوف (Wrap text + تلوين ON/OFF)
+        for row_num in range(2, ws.max_row + 1):
+            status_val = ""
+            if on_off_col_idx:
+                status_val = str(ws.cell(row=row_num, column=on_off_col_idx).value).strip().upper()
+                
+            for col_num in range(1, ws.max_column + 1):
+                cell = ws.cell(row=row_num, column=col_num)
+                cell.alignment = Alignment(vertical="center", wrap_text=True)
+                
+                # تلوين الصف أو خلايا الماكينة والحالة بناءً على ON / OFF
+                if status_val == "ON":
+                    if col_num == on_off_col_idx or (mc_col_idx and col_num == mc_col_idx):
+                        cell.fill = green_fill
+                        cell.font = green_font
+                elif status_val == "OFF":
+                    if col_num == on_off_col_idx or (mc_col_idx and col_num == mc_col_idx):
+                        cell.fill = red_fill
+                        cell.font = red_font
+
+        # ضبط عرض الأعمدة تلقائياً (Auto-fit) ليناسب المحتوى تماماً
+        for col in ws.columns:
+            max_len = 0
+            col_letter = openpyxl.utils.get_column_letter(col[0].column)
+            for cell in col:
+                if cell.value:
+                    val_str = str(cell.value)
+                    if len(val_str) > max_len:
+                        max_len = len(val_str)
+            ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 40)
+
+        final_output = BytesIO()
+        wb.save(final_output)
+        final_output.seek(0)
+
+        st.download_button(
+            label="📥 تحميل التقرير النهائي المنسق (Excel)",
+            data=final_output,
+            file_name="Master_Formatted_Knitting_Report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
             
     except Exception as e:
         st.error(f"❌ حدث خطأ أثناء المعالجة: {e}")
