@@ -5,8 +5,8 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الذكي", layout="wide")
-st.title("🧵 نظام تخطيط ومتابعة التريكو - التقرير الشامل (تصميم البلان المجمع)")
-st.markdown("عرض ملف التراك، وبجواقه ملف البلان بحيث يكون كل Work Order مجمع ومدمج وأمامه كافة الماكينات والتفاصيل الخاصة به.")
+st.title("🧵 نظام تخطيط ومتابعة التريكو - تفصيل الأوردرات والماكينات")
+st.markdown("عرض التراك وبجوار جدول البلان بحيث يظهر كل Work Order مدمج وأمامه صفوف منفصلة لكل ماكينة بتفاصيلها الكاملة.")
 
 col1, col2 = st.columns(2)
 
@@ -32,7 +32,6 @@ if uploaded_tracking is not None:
         df_track = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=header_track_idx)
         df_track = df_track.dropna(how='all')
         
-        # تنظيف الدمج للأعمدة الرئيسية في التراك
         for col in df_track.columns:
             col_str = str(col).strip().upper()
             if any(k in col_str for k in ['ROLLS', 'ORDER', 'CUSTMER', 'QUALITIES']):
@@ -40,10 +39,10 @@ if uploaded_tracking is not None:
                 
         df_track = df_track.fillna("")
         
-        # 2. قراءة ملف البلان وتجميع الأوردرات مع ماكيناتها
+        # 2. قراءة ملف البلان وتوزيع كل ماكينة وتفاصيلها كصفوف مستقلة تحت الأوردر
         df_plan = pd.DataFrame()
         if uploaded_plan is not None:
-            st.info(f"📁 جاري قراءة وتجميع ملف البلان: {uploaded_plan.name}...")
+            st.info(f"📁 جاري تحليل ملف البلان وتوزيع تفاصيل الماكينات: {uploaded_plan.name}...")
             
             if uploaded_plan.name.endswith('.xlsx'):
                 df_plan_raw = pd.read_excel(uploaded_plan, header=None)
@@ -57,7 +56,7 @@ if uploaded_tracking is not None:
                 df_plan = pd.read_excel(uploaded_plan, header=header_plan_idx)
                 df_plan = df_plan.dropna(how='all').fillna("")
                 
-                # ملء خلايا الماكينات المدمجة عمودياً
+                # ملء خلايا الماكينات المدمجة عمودياً لتظهر بجانب كل سطر تفصيلي
                 mc_col = None
                 for c in df_plan.columns:
                     c_low = str(c).strip().lower()
@@ -71,30 +70,13 @@ if uploaded_tracking is not None:
                     df_plan = df_plan.rename(columns={mc_col: 'Machine_Plan'})
                     df_plan['Machine_Plan'] = df_plan['Machine_Plan'].replace('', pd.NA).ffill()
                 
-                # توحيد اسم عمود الأوردر في البلان
                 plan_wo_col = next((c for c in df_plan.columns if 'work order' in str(c).lower() or 'order' in str(c).lower()), None)
                 if plan_wo_col:
                     df_plan = df_plan.rename(columns={plan_wo_col: 'Work_Order_Plan'})
-                    
-                    # تجميع الماكينات المرتبطة بكل Work Order في نص واحد أو صفوف مرتبة
-                    if 'Machine_Plan' in df_plan.columns:
-                        # دمج أسماء الماكينات التي يعمل عليها نفس الأوردر لتسهيل الرؤية
-                        grouped_machines = df_plan.groupby('Work_Order_Plan')['Machine_Plan'].apply(lambda x: ", ".join(sorted(set(str(v).strip() for v in x if str(v).strip())))).reset_index()
-                        grouped_machines = grouped_machines.rename(columns={'Machine_Plan': 'All_Assigned_Machines'})
-                        df_plan = pd.merge(df_plan, grouped_machines, on='Work_Order_Plan', how='left')
 
-                st.success(f"✅ تم معالجة وتجميع ملف البلان بنجاح ({len(df_plan)} صف)!")
-                
-            elif uploaded_plan.name.endswith('.pdf'):
-                pdf_reader = pypdf.PdfReader(uploaded_plan)
-                full_text = ""
-                for page in pdf_reader.pages:
-                    full_text += page.extract_text() + "\n"
-                from io import StringIO
-                df_plan = pd.read_fwf(StringIO(full_text))
-                df_plan = df_plan.fillna("")
+                st.success(과f"✅ تم معالجة ملف البلان وفرد تفاصيل الماكينات بنجاح ({len(df_plan)} صف)!")
 
-        # 3. الدمج بين التراك والبلان المجمع
+        # 3. الدمج الشامل بين التراك والبلان المفصل
         if not df_plan.empty:
             track_wo = next((c for c in df_track.columns if 'work order' in str(c).lower() or 'order' in str(c).lower()), None)
             
@@ -112,11 +94,11 @@ if uploaded_tracking is not None:
 
         master_df = master_df.fillna("")
 
-        st.subheader("📊 معاينة التقرير الموحد الجديد:")
+        st.subheader("📊 معاينة التقرير النهائي المفصل:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
         # 4. تصدير وتنسيق ملف الإكسيل الاحترافي
-        output_filename = "Master_Grouped_Knitting_Report.xlsx"
+        output_filename = "Master_Detailed_Knitting_Report.xlsx"
         
         with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
             master_df.to_excel(writer, index=False, sheet_name='Master Report')
@@ -134,7 +116,7 @@ if uploaded_tracking is not None:
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             
-        # البحث عن أعمدة الحالة والماكينة في التراك لتلوين ON و OFF
+        # البحث عن أعمدة الحالة والماكينة في التراك لتلوين ON / OFF
         on_off_col_idx = None
         mc_col_idx = None
         for col_num in range(1, ws.max_column + 1):
@@ -151,7 +133,7 @@ if uploaded_tracking is not None:
         red_fill = PatternFill(start_color="F4CCCC", end_color="F4CCCC", fill_type="solid")
         red_font = Font(name="Calibri", size=10, bold=True, color="660000")
 
-        # تطبيق التنسيق والالتفاف (Wrap Text) والتلوين
+        # تطبيق التنسيق والالتفاف (Wrap Text) وتلوين التراك
         for row_num in range(2, ws.max_row + 1):
             status_val = ""
             if on_off_col_idx:
@@ -185,12 +167,12 @@ if uploaded_tracking is not None:
 
         with open(output_filename, "rb") as file:
             st.download_button(
-                label="📥 تحميل التقرير المجمع المنسق (Excel)",
+                label="📥 تحميل التقرير المفصل النهائي (Excel)",
                 data=file,
                 file_name=output_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("✅ تم إصدار التقرير المجمع بالهيكل الجديد بنجاح تام!")
+            st.success("✅ تم إصدار التقرير المفصل بالتنسيق المطلوب بنجاح!")
             
     except Exception as e:
         st.error(f"❌ حدث خطأ أثناء المعالجة: {e}")
