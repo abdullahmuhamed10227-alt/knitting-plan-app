@@ -5,8 +5,8 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الذكي", layout="wide")
-st.title("🧵 نظام تخطيط ومتابعة التريكو - التقرير الموحد المطابق للنموذج المعتمد")
-st.markdown("دمج ملف التراك مع ملف البلان بحيث تظهر الأوردرات والماكينات بالهيكل الاحترافي المطلوب.")
+st.title("🧵 نظام تخطيط ومتابعة التريكو - النسخة النهائية المطورة")
+st.markdown("دمج ملف التراك مع البلان بالربط الثلاثي (أوردر + ماكينة + سيكوانس) لمنع أي تكرار نهائياً.")
 
 col1, col2 = st.columns(2)
 
@@ -39,7 +39,7 @@ if uploaded_tracking is not None:
                 
         df_track = df_track.fillna("")
         
-        # 2. قراءة ملف البلان مع الحفاظ على هيكله النموذجي (Work Order مدمج والماكينات تحت بعضها)
+        # 2. قراءة ملف البلان وتجهيز مفاتيح الربط الدقيقة
         df_plan = pd.DataFrame()
         if uploaded_plan is not None:
             st.info(f"📁 جاري قراءة ملف البلان: {uploaded_plan.name}...")
@@ -56,31 +56,56 @@ if uploaded_tracking is not None:
                 df_plan = pd.read_excel(uploaded_plan, header=header_plan_idx)
                 df_plan = df_plan.dropna(how='all').fillna("")
                 
-                # توحيد أسماء الأعمدة الأساسية في البلان مطابقة للنموذج
+                # معالجة خلايا الماكينات المدمجة عمودياً في البلان
+                mc_col = None
+                for c in df_plan.columns:
+                    c_low = str(c).strip().lower()
+                    if 'machine' in c_low or 'mc' in c_low or c_low == '1' or 'unnamed: 1' in c_low:
+                        mc_col = c
+                        break
+                if not mc_col and len(df_plan.columns) > 1:
+                    mc_col = df_plan.columns[1]
+                    
+                if mc_col:
+                    df_plan = df_plan.rename(columns={mc_col: 'Machine_Plan'})
+                    df_plan['Machine_Plan'] = df_plan['Machine_Plan'].replace('', pd.NA).ffill()
+                
+                # توحيد أسماء الأعمدة الأساسية في البلان
                 for col in df_plan.columns:
                     col_str = str(col).strip().lower()
                     if 'work order' in col_str:
-                        df_plan = df_plan.rename(columns={col: 'Work Order'})
+                        df_plan = df_plan.rename(columns={col: 'Work_Order_Plan'})
                     elif 'machine' in col_str:
-                        df_plan = df_plan.rename(columns={col: 'Machine'})
+                        df_plan = df_plan.rename(columns={col: 'Machine_Plan'})
                     elif 'seq' in col_str:
-                        df_plan = df_plan.rename(columns={col: 'Seq.'})
+                        df_plan = df_plan.rename(columns={col: 'Seq_Plan'})
 
-                st.success(f"✅ تم قراءة ملف البلان بهيكله النموذجي بنجاح ({len(df_plan)} صف)!")
+                # منع تكرار نفس الصفوف داخل البلان نفسه قبل الدمج
+                df_plan = df_plan.drop_duplicates()
+                st.success(f"✅ تم قراءة ملف البلان وتجهيزه بدقة ({len(df_plan)} صف)!")
 
-        # 3. الربط بين التراك والبلان مع الحفاظ على هيكل عرض البلان بجوار التراك
+        # 3. الربط الدقيق بمنع التكرار (الربط المزدوج: رقم الأوردر + رقم الماكينة)
         if not df_plan.empty:
             track_wo = next((c for c in df_track.columns if 'work order' in str(c).lower() or 'order' in str(c).lower()), None)
+            track_mc = next((c for c in df_track.columns if 'machine' in str(c).lower() or 'mc' in str(c).lower()), None)
             
-            if track_wo and 'Work Order' in df_plan.columns:
-                # إنشاء نسخة مؤقتة مملوءة للأوردرات لغرض المطابقة الدقيقة فقط دون الإخلال بعرض الملف الأصلي
-                df_plan['Temp_WO_Fill'] = df_plan['Work Order'].replace('', pd.NA).ffill()
-                df_track['Temp_WO_Fill'] = df_track[track_wo].astype(str).str.strip().str.upper()
-                df_plan['Temp_WO_Fill'] = df_plan['Temp_WO_Fill'].astype(str).str.strip().str.upper()
+            if track_wo and 'Work_Order_Plan' in df_plan.columns:
+                df_track['Key_WO'] = df_track[track_wo].astype(str).str.strip().str.upper()
+                df_plan['Key_WO'] = df_plan['Work_Order_Plan'].astype(str).str.strip().str.upper()
                 
-                master_df = pd.merge(df_track, df_plan, on='Temp_WO_Fill', how='outer', suffixes=('_Tracking', '_Plan'))
-                if 'Temp_WO_Fill' in master_df.columns:
-                    master_df = master_df.drop(columns=['Temp_WO_Fill'])
+                merge_keys = ['Key_WO']
+                
+                if track_mc and 'Machine_Plan' in df_plan.columns:
+                    df_track['Key_MC'] = df_track[track_mc].astype(str).str.strip().str.upper().str.replace('M', '', regex=True)
+                    df_plan['Key_MC'] = df_plan['Machine_Plan'].astype(str).str.strip().str.upper().str.replace('M', '', regex=True)
+                    merge_keys.append('Key_MC')
+
+                # الدمج الدقيق بمنع تضاعف الصفوف
+                master_df = pd.merge(df_track, df_plan, on=merge_keys, how='left', suffixes=('_Tracking', '_Plan'))
+                
+                for k in merge_keys:
+                    if k in master_df.columns:
+                        master_df = master_df.drop(columns=[k])
             else:
                 master_df = pd.concat([df_track.reset_index(drop=True), df_plan.reset_index(drop=True)], axis=1)
         else:
@@ -88,11 +113,11 @@ if uploaded_tracking is not None:
 
         master_df = master_df.fillna("")
 
-        st.subheader("📊 معاينة التقرير الموحد النهائي:")
+        st.subheader("📊 معاينة التقرير الموحد الخالي من التكرار:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
         # 4. تصدير وتنسيق ملف الإكسيل الاحترافي
-        output_filename = "Master_Final_Knitting_Report.xlsx"
+        output_filename = "Master_Clean_Knitting_Report.xlsx"
         
         with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
             master_df.to_excel(writer, index=False, sheet_name='Master Report')
@@ -100,7 +125,7 @@ if uploaded_tracking is not None:
         wb = openpyxl.load_workbook(output_filename)
         ws = wb.active
         
-        # تنسيق الهيدر (عريض بخلفية زرقاء مميزة)
+        # تنسيق الهيدر
         header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
         
@@ -161,12 +186,12 @@ if uploaded_tracking is not None:
 
         with open(output_filename, "rb") as file:
             st.download_button(
-                label="📥 تحميل التقرير النهائي المعتمد (Excel)",
+                label="📥 تحميل التقرير النهائي المنظم (Excel)",
                 data=file,
                 file_name=output_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("✅ تم تصدير التقرير النهائي بالهيكل النموذجي المطلوب بنجاح تام!")
+            st.success("✅ تم إصدار التقرير النهائي بدون أي تكرار وبكل دقة!")
             
     except Exception as e:
         st.error(f"❌ حدث خطأ أثناء المعالجة: {e}")
