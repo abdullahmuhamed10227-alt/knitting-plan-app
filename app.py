@@ -116,16 +116,18 @@ if uploaded_tracking is not None:
         st.dataframe(master_df, use_container_width=True, height=600)
         
         # 4. تنسيق وهندسة ملف الإكسيل المصدر (تلوين ON/OFF، عريض الهيدر، Wrap Text، واحتواء الأعمدة)
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        output_filename = "Master_Formatted_Knitting_Report.xlsx"
+        
+        # حفظ مباشر باستخدام Pandas و openpyxl
+        with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
             master_df.to_excel(writer, index=False, sheet_name='Master Report')
             
-        output.seek(0)
-        wb = openpyxl.load_workbook(output)
+        # إعادة فتح الملف لتطبيق التنسيق والألوان
+        wb = openpyxl.load_workbook(output_filename)
         ws = wb.active
         
         # تنسيق الهيدر (العناوين العلوية)
-        header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid") # أزرق غامق احترافي
+        header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
         
         for col_num in range(1, ws.max_column + 1):
@@ -134,7 +136,7 @@ if uploaded_tracking is not None:
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             
-        # البحث عن عمود حالة الماكينة (ON/OFF) وعمود رقم الماكينة في جزء التراك لتلوينهم
+        # البحث عن عمود الحالة وعمود الماكينة في التراك
         on_off_col_idx = None
         mc_col_idx = None
         for col_num in range(1, ws.max_column + 1):
@@ -145,10 +147,10 @@ if uploaded_tracking is not None:
                 if not mc_col_idx:
                     mc_col_idx = col_num
 
-        green_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid") # أخضر فاتح
+        green_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
         green_font = Font(name="Calibri", size=10, bold=True, color="274E13")
         
-        red_fill = PatternFill(start_color="F4CCCC", end_color="F4CCCC", fill_type="solid") # أحمر فاتح
+        red_fill = PatternFill(start_color="F4CCCC", end_color="F4CCCC", fill_type="solid")
         red_font = Font(name="Calibri", size=10, bold=True, color="660000")
 
         # تطبيق التنسيق على الصفوف (Wrap text + تلوين ON/OFF)
@@ -161,7 +163,6 @@ if uploaded_tracking is not None:
                 cell = ws.cell(row=row_num, column=col_num)
                 cell.alignment = Alignment(vertical="center", wrap_text=True)
                 
-                # تلوين الصف أو خلايا الماكينة والحالة بناءً على ON / OFF
                 if status_val == "ON":
                     if col_num == on_off_col_idx or (mc_col_idx and col_num == mc_col_idx):
                         cell.fill = green_fill
@@ -171,7 +172,7 @@ if uploaded_tracking is not None:
                         cell.fill = red_fill
                         cell.font = red_font
 
-        # ضبط عرض الأعمدة تلقائياً (Auto-fit) ليناسب المحتوى تماماً
+        # ضبط عرض الأعمدة تلقائياً (Auto-fit)
         for col in ws.columns:
             max_len = 0
             col_letter = openpyxl.utils.get_column_letter(col[0].column)
@@ -182,16 +183,16 @@ if uploaded_tracking is not None:
                         max_len = len(val_str)
             ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 40)
 
-        final_output = BytesIO()
-        wb.save(final_output)
-        final_output.seek(0)
+        wb.save(output_filename)
 
-        st.download_button(
-            label="📥 تحميل التقرير النهائي المنسق (Excel)",
-            data=final_output,
-            file_name="Master_Formatted_Knitting_Report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        with open(output_filename, "rb") as file:
+            st.download_button(
+                label="📥 تحميل التقرير النهائي المنسق (Excel)",
+                data=file,
+                file_name=output_filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            st.success("✅ تم تصدير وتنسيق ملف الإكسيل بنجاح تام وحفظه على الجهاز!")
             
     except Exception as e:
         st.error(f"❌ حدث خطأ أثناء المعالجة: {e}")
