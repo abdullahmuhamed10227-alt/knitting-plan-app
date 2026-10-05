@@ -39,8 +39,19 @@ if uploaded_tracking is not None and uploaded_plan is not None:
                 
         df_track = df_track.fillna("")
         
-        # تمييز أعمدة التراك لمنع أي تعارض في الأسماء
-        df_track = df_track.rename(columns=lambda c: f"{str(c).strip()}_Tracking" if c != '--- TRACKING ---' else c)
+        # تنظيف أسماء أعمدة التراك وجعلها فريدة تماماً لمنع أي تكرار
+        track_columns = []
+        seen_track = set()
+        for idx, c in enumerate(df_track.columns):
+            c_name = str(c).strip()
+            if not c_name or c_name.lower().startswith('unnamed'):
+                c_name = f"Track_Col_{idx}"
+            base_name = f"{c_name}_Tracking"
+            while base_name in seen_track:
+                base_name += f"_{idx}"
+            seen_track.add(base_name)
+            track_columns.append(base_name)
+        df_track.columns = track_columns
         
         # 2. قراءة ومعالجة ملف البلان وترتيب أعمدته بالترتيب النموذجي المطلوب
         df_plan = pd.DataFrame()
@@ -105,8 +116,17 @@ if uploaded_tracking is not None and uploaded_plan is not None:
 
         df_plan = df_plan.fillna("")
         
-        # تمييز أعمدة البلان لمنع أي تعارض في الأسماء
-        df_plan = df_plan.rename(columns=lambda c: f"{str(c).strip()}_Plan" if c != '--- PLAN ---' else c)
+        # تنظيف أسماء أعمدة البلان وجعلها فريدة تماماً لمنع أي تكرار
+        plan_columns = []
+        seen_plan = set()
+        for idx, c in enumerate(df_plan.columns):
+            c_name = str(c).strip()
+            base_name = f"{c_name}_Plan"
+            while base_name in seen_plan:
+                base_name += f"_{idx}"
+            seen_plan.add(base_name)
+            plan_columns.append(base_name)
+        df_plan.columns = plan_columns
 
         # 3. عرض الجدولين جنباً إلى جنب ككتلتين مستقلتين تماماً
         df_track_reset = df_track.reset_index(drop=True)
