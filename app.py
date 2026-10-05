@@ -5,8 +5,8 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
 st.set_page_config(page_title="نظام تخطيط ومتابعة التريكو الذكي", layout="wide")
-st.title("🧵 نظام تخطيط ومتابعة التريكو - التقرير المستقل والمنظم")
-st.markdown("عرض ملف التراك منسقاً وملوناً، وبجواره ملف البلان مرتباً بالترتيب النموذجي الدقيق بدون أي تداخل أو تكرار في الأسماء.")
+st.title("🧵 نظام تخطيط ومتابعة التريكو - التقرير القياسي مع دمج الأوردرات المتشابهة")
+st.markdown("عرض التراك منسقاً، وجدولة ملف البلان مرتباً بالترتيب النموذجي مع دمج (Merge) أرقام الأوردرات المتشابهة تلقائياً.")
 
 col1, col2 = st.columns(2)
 
@@ -18,7 +18,7 @@ with col2:
 
 if uploaded_tracking is not None and uploaded_plan is not None:
     try:
-        st.info("🔄 جاري معالجة ملفات التراك والبلان باستقلالية تامة...")
+        st.info("🔄 جاري معالجة ملفات التراك والبلان وتجهيز الدمج...")
         
         # 1. قراءة ومعالجة ملف التراك الأساسي
         df_track_raw = pd.read_excel(uploaded_tracking, sheet_name='OVER VIEW', header=None)
@@ -39,7 +39,7 @@ if uploaded_tracking is not None and uploaded_plan is not None:
                 
         df_track = df_track.fillna("")
         
-        # تنظيف أسماء أعمدة التراك وجعلها فريدة تماماً لمنع أي تكرار
+        # تنظيف أسماء أعمدة التراك وجعلها فريدة
         track_columns = []
         seen_track = set()
         for idx, c in enumerate(df_track.columns):
@@ -53,7 +53,7 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             track_columns.append(base_name)
         df_track.columns = track_columns
         
-        # 2. قراءة ومعالجة ملف البلان وترتيب أعمدته بالترتيب النموذجي المطلوب
+        # 2. قراءة ومعالجة ملف البلان بالترتيب القياسي المطلوب
         df_plan = pd.DataFrame()
         if uploaded_plan.name.endswith('.xlsx'):
             df_plan_raw = pd.read_excel(uploaded_plan, header=None)
@@ -112,11 +112,12 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             if 'Machine' in df_plan.columns:
                 df_plan['Machine'] = df_plan['Machine'].replace('', pd.NA).ffill()
                 
-            df_plan = df_plan.drop_duplicates()
+            # ترتيب البلان تصاعدياً حسب رقم الأوردر لتسهيل وتجميع دمج الخلايا بدقة
+            df_plan = df_plan.sort_values(by=['Work Order', 'Machine']).drop_duplicates()
 
         df_plan = df_plan.fillna("")
         
-        # تنظيف أسماء أعمدة البلان وجعلها فريدة تماماً لمنع أي تكرار
+        # تنظيف أسماء أعمدة البلان وجعلها فريدة
         plan_columns = []
         seen_plan = set()
         for idx, c in enumerate(df_plan.columns):
@@ -128,7 +129,7 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             plan_columns.append(base_name)
         df_plan.columns = plan_columns
 
-        # 3. عرض الجدولين جنباً إلى جنب ككتلتين مستقلتين تماماً
+        # 3. دمج عرض الجدولين جنباً إلى جنب ككتلتين مستقلتين
         df_track_reset = df_track.reset_index(drop=True)
         df_plan_reset = df_plan.reset_index(drop=True)
         
@@ -138,11 +139,11 @@ if uploaded_tracking is not None and uploaded_plan is not None:
         master_df = pd.concat([df_track_reset, df_plan_reset], axis=1)
         master_df = master_df.fillna("")
 
-        st.subheader("📊 معاينة التقرير المستقل بالترتيب القياسي:")
+        st.subheader("📊 معاينة التقرير النهائي:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
-        # 4. تصدير وتنسيق ملف الإكسيل الاحترافي
-        output_filename = "Master_Standard_Knitting_Report.xlsx"
+        # 4. تصدير وتنسيق ملف الإكسيل الاحترافي (مع تنفيذ الـ Merge الحقيقي للأوردرات المتشابهة في البلان)
+        output_filename = "Master_Merged_Knitting_Report.xlsx"
         
         with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
             master_df.to_excel(writer, index=False, sheet_name='Master Report')
@@ -160,6 +161,33 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             
+        # العثور على رقم عمود "Work Order_Plan" في الإكسيل لتنفيذ الـ Merge لـه
+        wo_plan_col_idx = None
+        for col_num in range(1, ws.max_column + 1):
+            col_name = str(ws.cell(row=1, column=col_num).value).strip()
+            if col_name == 'Work Order_Plan':
+                wo_plan_col_idx = col_num
+                break
+
+        # تنفيذ الـ Merge الحقيقي (دمج الخلايا) للأوردرات المتشابهة والمتتالية في عمود الأوردر بالبلان
+        if wo_plan_col_idx:
+            start_row = 2
+            while start_row <= ws.max_row:
+                val = ws.cell(row=start_row, column=wo_plan_col_idx).value
+                end_row = start_row
+                
+                # البحث عن مدى الصفوف التي تحمل نفس رقم الأوردر لتتم عملية الدمج
+                while end_row + 1 <= ws.max_row and ws.cell(row=end_row + 1, column=wo_plan_col_idx).value == val and val != "":
+                    end_row += 1
+                
+                if end_row > start_row and val != "":
+                    ws.merge_cells(start_row=start_row, start_column=wo_plan_col_idx, end_row=end_row, end_column=wo_plan_col_idx)
+                    # محاذاة النص في المنتصف للخلية المدمجة
+                    merged_cell = ws.cell(row=start_row, column=wo_plan_col_idx)
+                    merged_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                
+                start_row = end_row + 1
+
         # تلوين حالات ON (أخضر) و OFF (أحمر) في جزء التراك فقط
         on_off_col_idx = None
         mc_col_idx = None
@@ -184,6 +212,9 @@ if uploaded_tracking is not None and uploaded_plan is not None:
                 
             for col_num in range(1, ws.max_column + 1):
                 cell = ws.cell(row=row_num, column=col_num)
+                # تجاهل الخلايا المدمجة لتجنب أخطاء تنسيق openpyxl
+                if type(cell).__name__ == 'MergedCell':
+                    continue
                 cell.alignment = Alignment(vertical="center", wrap_text=True)
                 
                 if status_val == "ON":
@@ -200,7 +231,7 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             max_len = 0
             col_letter = openpyxl.utils.get_column_letter(col[0].column)
             for cell in col:
-                if cell.value:
+                if cell.value and type(cell).__name__ != 'MergedCell':
                     val_str = str(cell.value)
                     if len(val_str) > max_len:
                         max_len = len(val_str)
@@ -210,12 +241,12 @@ if uploaded_tracking is not None and uploaded_plan is not None:
 
         with open(output_filename, "rb") as file:
             st.download_button(
-                label="📥 تحميل التقرير القياسي النهائي (Excel)",
+                label="📥 تحميل التقرير النهائي المدمج (Excel)",
                 data=file,
                 file_name=output_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("✅ تم إصدار التقرير بالترتيب القياسي الدقيق وبفصل تام بين التراك والبلان!")
+            st.success("✅ تم إصدار التقرير النهائي مع دمج أرقام الأوردرات المتشابهة بنجاح تام!")
             
     except Exception as e:
         st.error(f"❌ حدث خطأ أثناء المعالجة: {e}")
