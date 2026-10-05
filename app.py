@@ -39,7 +39,7 @@ if uploaded_tracking is not None and uploaded_plan is not None:
                 
         df_track = df_track.fillna("")
         
-        # تنظيف أسماء أعمدة التراك وجعلها فريدة
+        # جعل أسماء أعمدة التراك فريدة 100%
         track_columns = []
         seen_track = set()
         for idx, c in enumerate(df_track.columns):
@@ -97,6 +97,9 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             
             df_plan = df_plan.rename(columns=rename_map)
             
+            # التأكد من عدم وجود تكرار في المفاتيح قبل إسقاط الأعمدة
+            df_plan = df_plan.loc[:, ~df_plan.columns.duplicated()]
+            
             standard_plan_cols = [
                 'Work Order', 'Machine', 'Seq.', 'Gauge_Specs', 'Item Description', 
                 'Sample Number', 'Ref.Note', 'Pl/Tot.Qty', 'Dailiy Prd.', 
@@ -112,12 +115,11 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             if 'Machine' in df_plan.columns:
                 df_plan['Machine'] = df_plan['Machine'].replace('', pd.NA).ffill()
                 
-            # ترتيب البلان تصاعدياً حسب رقم الأوردر لتسهيل وتجميع دمج الخلايا بدقة
             df_plan = df_plan.sort_values(by=['Work Order', 'Machine']).drop_duplicates()
 
         df_plan = df_plan.fillna("")
         
-        # تنظيف أسماء أعمدة البلان وجعلها فريدة
+        # جعل أسماء أعمدة البلان فريدة 100% لمنع أي خطأ
         plan_columns = []
         seen_plan = set()
         for idx, c in enumerate(df_plan.columns):
@@ -142,7 +144,7 @@ if uploaded_tracking is not None and uploaded_plan is not None:
         st.subheader("📊 معاينة التقرير النهائي:")
         st.dataframe(master_df, use_container_width=True, height=600)
         
-        # 4. تصدير وتنسيق ملف الإكسيل الاحترافي (مع تنفيذ الـ Merge الحقيقي للأوردرات المتشابهة في البلان)
+        # 4. تصدير وتنسيق ملف الإكسيل الاحترافي
         output_filename = "Master_Merged_Knitting_Report.xlsx"
         
         with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
@@ -161,7 +163,7 @@ if uploaded_tracking is not None and uploaded_plan is not None:
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             
-        # العثور على رقم عمود "Work Order_Plan" في الإكسيل لتنفيذ الـ Merge لـه
+        # العثور على رقم عمود "Work Order_Plan" في الإكسيل لتنفيذ الـ Merge له
         wo_plan_col_idx = None
         for col_num in range(1, ws.max_column + 1):
             col_name = str(ws.cell(row=1, column=col_num).value).strip()
@@ -169,20 +171,18 @@ if uploaded_tracking is not None and uploaded_plan is not None:
                 wo_plan_col_idx = col_num
                 break
 
-        # تنفيذ الـ Merge الحقيقي (دمج الخلايا) للأوردرات المتشابهة والمتتالية في عمود الأوردر بالبلان
+        # تنفيذ الـ Merge الحقيقي (دمج الخلايا) للأوردرات المتشابهة في البلان
         if wo_plan_col_idx:
             start_row = 2
             while start_row <= ws.max_row:
                 val = ws.cell(row=start_row, column=wo_plan_col_idx).value
                 end_row = start_row
                 
-                # البحث عن مدى الصفوف التي تحمل نفس رقم الأوردر لتتم عملية الدمج
                 while end_row + 1 <= ws.max_row and ws.cell(row=end_row + 1, column=wo_plan_col_idx).value == val and val != "":
                     end_row += 1
                 
                 if end_row > start_row and val != "":
                     ws.merge_cells(start_row=start_row, start_column=wo_plan_col_idx, end_row=end_row, end_column=wo_plan_col_idx)
-                    # محاذاة النص في المنتصف للخلية المدمجة
                     merged_cell = ws.cell(row=start_row, column=wo_plan_col_idx)
                     merged_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
                 
@@ -212,7 +212,6 @@ if uploaded_tracking is not None and uploaded_plan is not None:
                 
             for col_num in range(1, ws.max_column + 1):
                 cell = ws.cell(row=row_num, column=col_num)
-                # تجاهل الخلايا المدمجة لتجنب أخطاء تنسيق openpyxl
                 if type(cell).__name__ == 'MergedCell':
                     continue
                 cell.alignment = Alignment(vertical="center", wrap_text=True)
